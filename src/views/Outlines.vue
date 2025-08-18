@@ -248,7 +248,7 @@ export default {
     
     // Generate unique render ID for this tab/component instance
     const outlineRenderID = ref(generateRenderID());
-    
+
     // Remove mock workspace assignment; rely on store / route
     if (!workspaceStore.currentWorkspace && workspaceId.value) {
       // Attempt to set from existing store list if available
@@ -257,13 +257,13 @@ export default {
         workspaceStore.setCurrentWorkspace(existing)
       }
     }
-    
+
     // Computed property for current workspace
     const currentWorkspace = computed(() => workspaceStore.currentWorkspace);
     
     // Computed property for workspace name
     const workspaceName = computed(() => currentWorkspace.value?.title || 'Workspace');
-    
+
     // Function to update page title
     const updatePageTitle = () => {
       const focusedNode = focusedId.value ? findItemById(outline.value, focusedId.value) : null;
@@ -411,12 +411,14 @@ export default {
     }
 
     // Load from Supabase or localStorage
-    onMounted(async () => {
+    async function loadOutline() {
       if (!workspaceId.value) return;
       loadCollapsedState();
       const focusParam = route.query.focus; if (focusParam) focusedId.value = parseInt(focusParam);
 
-      // Try Supabase first
+      // Reset change tracking
+      hasChanges.value = false;
+
       try {
         const { data: { user: authUser } } = await supabase.auth.getUser();
         if (authUser) {
@@ -435,16 +437,10 @@ export default {
             lastSavedContent.value = deepClone(outline.value);
             currentVersion.value = existingOutline.version || 1;
           } else {
-            // Create initial outline row
             const initial = deepClone(defaultOutline);
             const { data: created, error: createErr } = await supabase
               .from('outlines')
-              .insert([{
-                workspace_id: workspaceId.value,
-                title: 'Outline',
-                content: initial,
-                created_by: authUser.id
-              }])
+              .insert([{ workspace_id: workspaceId.value, title: 'Outline', content: initial }])
               .select('id, version')
               .single();
             if (!createErr && created) {
@@ -475,6 +471,24 @@ export default {
       }
 
       updatePageTitle();
+    }
+
+    onMounted(async () => {
+      await loadOutline();
+    });
+
+    // Reload outline when workspace changes via navigation (same component instance)
+    watch(workspaceId, async (newVal, oldVal) => {
+      if (!newVal || newVal === oldVal) return;
+      // Reset state before loading new workspace outline
+      outline.value = [];
+      outlineId.value = null;
+      currentVersion.value = 1;
+      lastSavedContent.value = null;
+      focusedId.value = null;
+      collapsedNodes.value = new Set();
+      lastSaveTime.value = null;
+      await loadOutline();
     });
 
     async function saveOutline() {
