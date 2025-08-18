@@ -981,6 +981,14 @@ To prevent data loss and conflicts, you need to reload the latest changes before
 
     return { 
       workspaceId,
+      // expose icons to template for :icon / :prefix-icon bindings
+      Search,
+      Refresh,
+      Clock,
+      Back,
+      Loading,
+      Warning,
+      Check,
       outline, 
       saving,
       refreshing,
