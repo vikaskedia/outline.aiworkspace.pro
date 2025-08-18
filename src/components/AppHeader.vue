@@ -754,4 +754,18 @@ export default {
 .nav-link { display:block; width:100%; text-decoration:none; color:inherit; }
 .nav-link:hover { color:#2c3e50; }
 .el-dropdown-menu .active > .nav-link { font-weight:600; }
+/* Remove blue focus outline/border on dropdown triggers */
+.nav-item:focus,
+.nav-item:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+:deep(.el-dropdown .el-tooltip__trigger:focus),
+:deep(.el-dropdown .el-tooltip__trigger:focus-visible) {
+  outline: none !important;
+  box-shadow: none !important;
+}
+:deep(.el-dropdown .el-tooltip__trigger) {
+  box-shadow: none !important;
+}
 </style>
