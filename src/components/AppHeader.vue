@@ -305,7 +305,7 @@ export default {
       // Handle workspace switching from assigned workspaces dropdown
       if (command.startsWith('workspace-')) {
         const workspaceId = command.replace('workspace-', '')
-        const workspace = assignedWorkspaces.value.find(w => w.id === workspaceId)
+        const workspace = assignedWorkspaces.value.find(w => w.id === parseInt(workspaceId))
         if (workspace) {
           switchWorkspace(workspace)
         }
