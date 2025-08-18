@@ -347,19 +347,19 @@ export default {
     };
 
     const handleCollapseToggle = (nodeId, isCollapsed) => {
-      console.log('handleCollapseToggle called with:', { nodeId, isCollapsed, currentCollapsedNodes: Array.from(collapsedNodes.value) });
+      //console.log('handleCollapseToggle called with:', { nodeId, isCollapsed, currentCollapsedNodes: Array.from(collapsedNodes.value) });
       if (isCollapsed) {
         collapsedNodes.value.add(nodeId.toString());
       } else {
         collapsedNodes.value.delete(nodeId.toString());
       }
-      console.log('After toggle, collapsedNodes:', Array.from(collapsedNodes.value));
+      //console.log('After toggle, collapsedNodes:', Array.from(collapsedNodes.value));
       saveCollapsedState();
     };
 
     const isNodeCollapsed = (nodeId) => {
       const result = collapsedNodes.value.has(nodeId.toString());
-      console.log('isNodeCollapsed check for node:', nodeId, 'result:', result, 'collapsedNodes:', Array.from(collapsedNodes.value));
+      //console.log('isNodeCollapsed check for node:', nodeId, 'result:', result, 'collapsedNodes:', Array.from(collapsedNodes.value));
       return result;
     };
 
@@ -587,7 +587,7 @@ export default {
     }
 
     function handleMove({ draggedId, targetId, position }) {
-      console.log('Moving item:', { draggedId, targetId, position });
+      //console.log('Moving item:', { draggedId, targetId, position });
       
       const draggedItem = findItemById(outline.value, draggedId);
       if (!draggedItem) return;
@@ -777,7 +777,7 @@ export default {
       
       if (targetIndex !== undefined && flatItems[targetIndex]) {
         // Focus on the target item
-        console.log('Navigate to:', flatItems[targetIndex].id);
+        //console.log('Navigate to:', flatItems[targetIndex].id);
       }
     }
 
