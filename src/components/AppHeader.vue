@@ -14,6 +14,7 @@
       <!-- Center - Navigation -->
       <div class="header-center">
         <nav class="main-navigation">
+          <!-- Workspace selector -->
           <el-dropdown @command="handleNavCommand" trigger="hover">
             <span class="nav-item">
               {{ currentWorkspace?.title || 'Select Workspace' }}
@@ -41,16 +42,19 @@
 
           <span class="nav-divider">/</span>
 
-          <el-dropdown @command="handleNavCommand" trigger="hover">
+          <!-- Static secondary navigation -->
+          <el-dropdown trigger="hover">
             <span class="nav-item">
-              Outlines
+              {{ currentSectionLabel }}
               <el-icon class="nav-arrow"><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="outlines-all">All Outlines</el-dropdown-item>
-                <el-dropdown-item command="outlines-recent">Recent</el-dropdown-item>
-                <el-dropdown-item command="outlines-shared">Shared</el-dropdown-item>
+                <el-dropdown-item v-for="item in secondaryNavItems" :key="item.label" :class="{ active: item.active }">
+                  <a :href="item.href" class="nav-link" @click.stop>
+                    {{ item.label }}
+                  </a>
+                </el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -145,19 +149,54 @@ export default {
     const workspaceStore = useWorkspaceStore()
     
     const workspaceSwitcherVisible = ref(false)
-    const notificationCount = ref(3) // Mock notification count
+    const notificationCount = ref(3)
     const availableWorkspaces = ref([])
     const assignedWorkspaces = ref([])
-    const userInfo = ref({
-      name: '',
-      email: '',
-      avatar: null,
-      initials: ''
-    })
+    const userInfo = ref({ name: '', email: '', avatar: null, initials: '' })
     const workspaceTree = ref([])
     const flattenedWorkspaces = ref([])
 
     const currentWorkspace = computed(() => workspaceStore.currentWorkspace)
+
+    // Static secondary nav items (hrefs can be adjusted later)
+    const secondaryNavItems = ref([
+      { label: 'Dashboard', href: '/dashboard' },
+      { label: 'Goals', href: '/goals' },
+      { label: 'Tasks', href: '/tasks' },
+      { label: 'Events', href: '/events' },
+      { label: 'Files', href: '/files' },
+      { label: 'Outlines', href: computed(() => currentWorkspace.value ? `/single-workspace/${currentWorkspace.value.id}/outlines` : '/outlines') },
+      { label: 'Communications', href: '/communications' },
+      { label: 'Canvas', href: '/canvas' },
+      { label: 'AI Phone', href: '/ai-phone' },
+      { label: 'AI Intake', href: '/ai-intake' },
+      { label: 'AI Fax', href: '/ai-fax' },
+      { label: 'AI Portfolios', href: '/ai-portfolios' },
+      { label: 'AI Fund Analyst', href: '/ai-fund-analyst' },
+      { label: 'Contacts', href: '/contacts' },
+      { label: 'Settings', href: '/settings' }
+    ])
+
+    const currentSectionLabel = computed(() => {
+      const path = route.path.toLowerCase()
+      const match = secondaryNavItems.value.find(item => {
+        const href = typeof item.href === 'string' ? item.href : item.href.value
+        return href !== '/' && path.startsWith(href.toLowerCase())
+      })
+      return match ? match.label : 'Outlines'
+    })
+
+    // Mark active item
+    const updateActiveSecondary = () => {
+      const path = route.path.toLowerCase()
+      secondaryNavItems.value.forEach(item => {
+        const href = typeof item.href === 'string' ? item.href : item.href.value
+        item.active = path.startsWith(href.toLowerCase())
+      })
+    }
+
+    watch(route, () => updateActiveSecondary())
+    watch(currentWorkspace, () => updateActiveSecondary())
 
     // Load user info from Supabase session
     const loadUserInfo = async () => {
@@ -414,6 +453,7 @@ export default {
     onMounted(async () => {
       await loadUserInfo()
       await loadWorkspaces()
+      updateActiveSecondary()
     })
 
     // Watch for route changes to update current workspace
@@ -435,7 +475,9 @@ export default {
       handleNavCommand,
       handleUserCommand,
       switchWorkspace,
-      createNewWorkspace
+      createNewWorkspace,
+      secondaryNavItems,
+      currentSectionLabel
     }
   }
 }
@@ -708,4 +750,8 @@ export default {
     font-size: 0.9rem;
   }
 }
+
+.nav-link { display:block; width:100%; text-decoration:none; color:inherit; }
+.nav-link:hover { color:#2c3e50; }
+.el-dropdown-menu .active > .nav-link { font-weight:600; }
 </style>
