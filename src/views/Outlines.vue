@@ -249,11 +249,14 @@ export default {
     // Generate unique render ID for this tab/component instance
     const outlineRenderID = ref(generateRenderID());
     
-    // Set a mock workspace for demo
-    workspaceStore.setCurrentWorkspace({
-      id: workspaceId.value,
-      title: `Workspace ${workspaceId.value}`
-    });
+    // Remove mock workspace assignment; rely on store / route
+    if (!workspaceStore.currentWorkspace && workspaceId.value) {
+      // Attempt to set from existing store list if available
+      const existing = workspaceStore.workspaces.find(w => w.id.toString() === workspaceId.value.toString())
+      if (existing) {
+        workspaceStore.setCurrentWorkspace(existing)
+      }
+    }
     
     // Computed property for current workspace
     const currentWorkspace = computed(() => workspaceStore.currentWorkspace);
@@ -407,146 +410,100 @@ export default {
       }
     }
 
-    // Load from localStorage or use default
+    // Load from Supabase or localStorage
     onMounted(async () => {
       if (!workspaceId.value) return;
-
-      // Load collapsed state first
       loadCollapsedState();
+      const focusParam = route.query.focus; if (focusParam) focusedId.value = parseInt(focusParam);
 
-      // Check for focus query parameter
-      const focusParam = route.query.focus;
-      if (focusParam) {
-        focusedId.value = parseInt(focusParam);
-      }
-
-      // First load from localStorage
-      const localStorageKey = getLocalStorageKey();
-      const versionKey = getVersionKey();
-      const data = localStorage.getItem(localStorageKey);
-      const storedVersion = localStorage.getItem(versionKey);
-
-      if (data) {
-        try {
-          const parsedData = JSON.parse(data);
-          outline.value = Array.isArray(parsedData) ? parsedData : [parsedData];
-          ensureAutoFocusProp(outline.value);
-          lastSavedContent.value = deepClone(outline.value);
-          
-          if (storedVersion) {
-            currentVersion.value = parseInt(storedVersion);
-          }
-        } catch (error) {
-          console.error('Error parsing stored outline:', error);
-          outline.value = deepClone(defaultOutline);
-          ensureAutoFocusProp(outline.value);
-        }
-      } else {
-        outline.value = deepClone(defaultOutline);
-        ensureAutoFocusProp(outline.value);
-      }
-
-      // Update page title
-      updatePageTitle();
-
-      // Then fetch from Supabase (commented out for demo)
-      // try {
-      //   await refreshOutlineData();
-      // } catch (error) {
-      //   console.error('Error fetching from Supabase:', error);
-      // }
-
-      // Add keyboard shortcut listener for Ctrl+S / Cmd+S and Ctrl+F / Cmd+F
-      const handleKeyDown = (event) => {
-        // Save shortcut
-        if ((event.ctrlKey || event.metaKey) && event.key === 's') {
-          event.preventDefault();
-          saveOutline();
-        }
-        
-        // Search shortcut
-        if ((event.ctrlKey || event.metaKey) && event.key === 'f') {
-          event.preventDefault();
-          const searchInput = document.querySelector('.search-input input');
-          if (searchInput) {
-            searchInput.focus();
+      // Try Supabase first
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser) {
+          const { data: existingOutline, error: outlineError } = await supabase
+            .from('outlines')
+            .select('id, content, version, title')
+            .eq('workspace_id', workspaceId.value)
+            .order('id', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          if (outlineError) console.warn('Outline fetch error', outlineError.message);
+          if (existingOutline && existingOutline.content) {
+            outlineId.value = existingOutline.id;
+            outline.value = Array.isArray(existingOutline.content) ? existingOutline.content : [];
+            ensureAutoFocusProp(outline.value);
+            lastSavedContent.value = deepClone(outline.value);
+            currentVersion.value = existingOutline.version || 1;
+          } else {
+            // Create initial outline row
+            const initial = deepClone(defaultOutline);
+            const { data: created, error: createErr } = await supabase
+              .from('outlines')
+              .insert([{
+                workspace_id: workspaceId.value,
+                title: 'Outline',
+                content: initial,
+                created_by: authUser.id
+              }])
+              .select('id, version')
+              .single();
+            if (!createErr && created) {
+              outlineId.value = created.id;
+              outline.value = initial;
+              ensureAutoFocusProp(outline.value);
+              lastSavedContent.value = deepClone(outline.value);
+              currentVersion.value = created.version || 1;
+            } else if (createErr) {
+              console.error('Create outline error', createErr.message);
+              outline.value = deepClone(defaultOutline); ensureAutoFocusProp(outline.value);
+            }
           }
         }
-      };
-
-      document.addEventListener('keydown', handleKeyDown);
-      
-      // Store the handlers for cleanup
-      onUnmounted(() => {
-        document.removeEventListener('keydown', handleKeyDown);
-        if (debouncedSave.cancel) {
-          debouncedSave.cancel();
-        }
-      });
-    });
-
-    // Watch for changes in outline - but don't auto-save on every change
-    // Only update localStorage and change detection
-    watch(outline, (val) => {
-      const localStorageKey = getLocalStorageKey();
-      localStorage.setItem(localStorageKey, JSON.stringify(val));
-      
-      hasChanges.value = checkForChanges(val);
-      
-      if (hasChanges.value) {
-        debouncedSave();
+      } catch (err) {
+        console.error('Supabase outline load failed, falling back to localStorage', err);
       }
-      
-      updateSearchStats();
-    }, { deep: true });
 
-    // Watch for changes in focused ID and update page title
-    watch(focusedId, () => {
-      updatePageTitle();
-    });
+      // Fallback to localStorage if still empty
+      if (outline.value.length === 0) {
+        const localStorageKey = getLocalStorageKey();
+        const versionKey = getVersionKey();
+        const data = localStorage.getItem(localStorageKey);
+        const storedVersion = localStorage.getItem(versionKey);
+        if (data) {
+          try { const parsedData = JSON.parse(data); outline.value = Array.isArray(parsedData) ? parsedData : [parsedData]; ensureAutoFocusProp(outline.value); lastSavedContent.value = deepClone(outline.value); if (storedVersion) currentVersion.value = parseInt(storedVersion); } catch { outline.value = deepClone(defaultOutline); ensureAutoFocusProp(outline.value); }
+        } else { outline.value = deepClone(defaultOutline); ensureAutoFocusProp(outline.value); }
+      }
 
-    // Watch for changes in workspace name and update page title
-    watch(workspaceName, () => {
       updatePageTitle();
     });
 
     async function saveOutline() {
       if (saving.value) return;
-      
       try {
         saving.value = true;
-        
-        // Save to localStorage
-        const localStorageKey = getLocalStorageKey();
-        const versionKey = getVersionKey();
+        const localStorageKey = getLocalStorageKey(); const versionKey = getVersionKey();
         localStorage.setItem(localStorageKey, JSON.stringify(outline.value));
-        
-        // Update version
-        const newVersion = currentVersion.value + 1;
-        currentVersion.value = newVersion;
+        // Persist to Supabase if outlineId exists
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser) {
+          if (outlineId.value) {
+            const { error: updateErr, data: updated } = await supabase
+              .from('outlines')
+              .update({ content: outline.value, updated_at: new Date().toISOString() })
+              .eq('id', outlineId.value)
+              .select('version')
+              .single();
+            if (updateErr) console.error('Outline update error', updateErr.message); else currentVersion.value = updated?.version || currentVersion.value + 1;
+          }
+        }
+        const newVersion = currentVersion.value; // version from DB or previous
         localStorage.setItem(versionKey, newVersion.toString());
-        
-        // Update tracking variables
-        lastSavedContent.value = deepClone(outline.value);
-        hasChanges.value = false;
-        lastSaveTime.value = new Date().toISOString();
-        
-        // In a real app, save to Supabase here
-        console.log('Outline saved to localStorage');
-        
-        // Update workspace activity
+        lastSavedContent.value = deepClone(outline.value); hasChanges.value = false; lastSaveTime.value = new Date().toISOString();
         updateWorkspaceActivity(workspaceId.value);
-        
       } catch (error) {
         console.error('Error saving outline:', error);
-        ElNotification({
-          title: 'Save Failed',
-          message: 'Could not save your changes. Please try again.',
-          type: 'error'
-        });
-      } finally {
-        saving.value = false;
-      }
+        ElNotification({ title: 'Save Failed', message: 'Could not save your changes. Please try again.', type: 'error' });
+      } finally { saving.value = false; }
     }
 
     // Update outline text by id (recursive)
@@ -981,6 +938,7 @@ To prevent data loss and conflicts, you need to reload the latest changes before
 
     return { 
       workspaceId,
+      outlineId,
       // expose icons to template for :icon / :prefix-icon bindings
       Search,
       Refresh,
@@ -1179,7 +1137,7 @@ To prevent data loss and conflicts, you need to reload the latest changes before
 }
 
 .empty-state {
-  text-align: center;
+  text-align: left;
   padding: 3rem;
   color: #666;
 }
