@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { supabase } from '../supabase'
 
 export const useWorkspaceStore = defineStore('workspace', () => {
@@ -9,7 +9,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const setCurrentWorkspace = (workspace) => {
     currentWorkspace.value = workspace
-    // Store in localStorage for persistence
     localStorage.setItem('current_workspace', JSON.stringify(workspace))
   }
 
@@ -24,34 +23,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const loadPersistedData = () => {
-    // Load current workspace
     const storedWorkspace = localStorage.getItem('current_workspace')
     if (storedWorkspace) {
-      try {
-        currentWorkspace.value = JSON.parse(storedWorkspace)
-      } catch (error) {
-        console.error('Error loading persisted workspace:', error)
-      }
+      try { currentWorkspace.value = JSON.parse(storedWorkspace) } catch (error) { console.error('Error loading persisted workspace:', error) }
     }
-
-    // Load available workspaces
     const storedWorkspaces = localStorage.getItem('available_workspaces')
     if (storedWorkspaces) {
-      try {
-        workspaces.value = JSON.parse(storedWorkspaces)
-      } catch (error) {
-        console.error('Error loading persisted workspaces:', error)
-      }
+      try { workspaces.value = JSON.parse(storedWorkspaces) } catch (error) { console.error('Error loading persisted workspaces:', error) }
     }
-
-    // Load user info
     const storedUser = localStorage.getItem('user_info')
     if (storedUser) {
-      try {
-        user.value = JSON.parse(storedUser)
-      } catch (error) {
-        console.error('Error loading persisted user:', error)
-      }
+      try { user.value = JSON.parse(storedUser) } catch (error) { console.error('Error loading persisted user:', error) }
     }
   }
 
@@ -64,63 +46,75 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     localStorage.removeItem('user_info')
   }
 
-  // New: load workspaces with hierarchy and access info
-  const loadWorkspaces = async () => {
+  // Updated: load workspaces with access + parent chain similar to old app
+  const loadWorkspaces = async (includeArchived = false) => {
     try {
       const { data: { user: authUser } } = await supabase.auth.getUser()
       if (!authUser) return []
 
-      // Assigned workspaces (shared)
-      const { data: assigned } = await supabase
-        .from('workspace_access')
-        .select(`
-          workspace_id,
-          access_type,
-          workspaces (
-            id, title, description, parent_workspace_id, created_by
-          )
-        `)
-        .eq('shared_with_user_id', authUser.id)
-
-      // Owned workspaces
-      const { data: owned } = await supabase
+      let query = supabase
         .from('workspaces')
-        .select('id, title, description, parent_workspace_id, created_by')
-        .eq('created_by', authUser.id)
+        .select(`
+          id, title, description, parent_workspace_id, created_by, archived, created_at,
+          workspace_access!inner ( access_type, shared_with_user_id ),
+          workspace_activities!left ( updated_at )
+        `)
+        .eq('workspace_access.shared_with_user_id', authUser.id)
 
-      const map = new Map()
+      if (!includeArchived) query = query.eq('archived', false)
 
-      ;(assigned || []).forEach(row => {
-        if (!row.workspaces) return
-        const w = row.workspaces
-        map.set(w.id, {
-          id: w.id,
-          title: w.title,
-            description: w.description || 'No description',
-          parent_workspace_id: w.parent_workspace_id,
-          created_by: w.created_by,
-          hasAccess: true,
-          accessType: row.access_type
+      const { data: userWorkspaces, error: userError } = await query
+      if (userError) throw userError
+
+      // Build access map
+      const userAccess = new Map()
+      ;(userWorkspaces || []).forEach(w => {
+        ;(w.workspace_access || []).forEach(acc => {
+          if (acc.shared_with_user_id === authUser.id) {
+            userAccess.set(w.id, acc)
+          }
         })
       })
 
-      ;(owned || []).forEach(w => {
-        map.set(w.id, {
-          id: w.id,
-          title: w.title,
-          description: w.description || 'No description',
-          parent_workspace_id: w.parent_workspace_id,
-          created_by: w.created_by,
-          hasAccess: true,
-          accessType: 'edit'
-        })
-      })
+      // Collect parent IDs missing
+      const parentIds = [...new Set(
+        (userWorkspaces || [])
+          .filter(w => w.parent_workspace_id)
+          .map(w => w.parent_workspace_id)
+          .filter(pid => !userAccess.has(pid))
+      )]
 
-      const list = Array.from(map.values())
-        .sort((a,b) => a.title.localeCompare(b.title))
+      let parentWorkspaces = []
+      if (parentIds.length) {
+        let parentQuery = supabase
+          .from('workspaces')
+          .select('id, title, description, parent_workspace_id, created_by, archived, created_at')
+          .in('id', parentIds)
+        if (!includeArchived) parentQuery = parentQuery.eq('archived', false)
+        const { data: parents, error: parentError } = await parentQuery
+        if (parentError) throw parentError
+        parentWorkspaces = parents || []
+      }
 
-      setWorkspaces(list)
-      return list
+      const combined = [...(userWorkspaces || []), ...parentWorkspaces]
+
+      const processed = combined.map(w => ({
+        id: w.id,
+        title: w.title,
+        description: w.description || 'No description',
+        parent_workspace_id: w.parent_workspace_id,
+        created_by: w.created_by,
+        archived: w.archived,
+        created_at: w.created_at,
+        latest_activity: w.workspace_activities?.[0]?.updated_at || w.created_at,
+        hasAccess: userAccess.has(w.id),
+        accessType: userAccess.get(w.id)?.access_type || null
+      }))
+
+      processed.sort((a, b) => new Date(b.latest_activity) - new Date(a.latest_activity))
+
+      setWorkspaces(processed)
+      return processed
     } catch (e) {
       console.error('loadWorkspaces error', e)
       return []
