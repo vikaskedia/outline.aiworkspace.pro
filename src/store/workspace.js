@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { supabase } from '../supabase'
 
 export const useWorkspaceStore = defineStore('workspace', () => {
   const currentWorkspace = ref(null)
@@ -63,6 +64,69 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     localStorage.removeItem('user_info')
   }
 
+  // New: load workspaces with hierarchy and access info
+  const loadWorkspaces = async () => {
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser()
+      if (!authUser) return []
+
+      // Assigned workspaces (shared)
+      const { data: assigned } = await supabase
+        .from('workspace_access')
+        .select(`
+          workspace_id,
+          access_type,
+          workspaces (
+            id, title, description, parent_workspace_id, created_by
+          )
+        `)
+        .eq('shared_with_user_id', authUser.id)
+
+      // Owned workspaces
+      const { data: owned } = await supabase
+        .from('workspaces')
+        .select('id, title, description, parent_workspace_id, created_by')
+        .eq('created_by', authUser.id)
+
+      const map = new Map()
+
+      ;(assigned || []).forEach(row => {
+        if (!row.workspaces) return
+        const w = row.workspaces
+        map.set(w.id, {
+          id: w.id,
+          title: w.title,
+            description: w.description || 'No description',
+          parent_workspace_id: w.parent_workspace_id,
+          created_by: w.created_by,
+          hasAccess: true,
+          accessType: row.access_type
+        })
+      })
+
+      ;(owned || []).forEach(w => {
+        map.set(w.id, {
+          id: w.id,
+          title: w.title,
+          description: w.description || 'No description',
+          parent_workspace_id: w.parent_workspace_id,
+          created_by: w.created_by,
+          hasAccess: true,
+          accessType: 'edit'
+        })
+      })
+
+      const list = Array.from(map.values())
+        .sort((a,b) => a.title.localeCompare(b.title))
+
+      setWorkspaces(list)
+      return list
+    } catch (e) {
+      console.error('loadWorkspaces error', e)
+      return []
+    }
+  }
+
   return {
     currentWorkspace,
     workspaces,
@@ -71,6 +135,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setWorkspaces,
     setUser,
     loadPersistedData,
-    clearData
+    clearData,
+    loadWorkspaces
   }
 })

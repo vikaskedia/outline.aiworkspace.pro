@@ -20,20 +20,20 @@
               <el-icon class="nav-arrow"><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
-              <el-dropdown-menu>
+              <el-dropdown-menu class="workspace-tree-dropdown">
                 <el-dropdown-item 
-                  v-for="workspace in assignedWorkspaces" 
-                  :key="workspace.id"
-                  :command="`workspace-${workspace.id}`"
+                  v-for="w in flattenedWorkspaces" 
+                  :key="w.id"
+                  :command="`workspace-${w.id}`"
                 >
-                  <div class="workspace-dropdown-item">
-                    <span class="workspace-icon">{{ workspace.icon || '📋' }}</span>
-                    <span>{{ workspace.title }}</span>
-                    <el-tag v-if="workspace.id === currentWorkspace?.id" size="small" type="success">Current</el-tag>
+                  <div class="workspace-dropdown-item" :style="{ paddingLeft: (w.level * 16) + 'px' }">
+                    <span class="workspace-icon">{{ w.children && w.children.length ? '📁' : '📄' }}</span>
+                    <span>{{ w.title }}</span>
+                    <el-tag v-if="w.id === currentWorkspace?.id" size="small" type="success">Current</el-tag>
                   </div>
                 </el-dropdown-item>
-                <el-dropdown-item v-if="assignedWorkspaces.length === 0" disabled>
-                  No assigned workspaces
+                <el-dropdown-item v-if="flattenedWorkspaces.length === 0" disabled>
+                  No workspaces
                 </el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -154,6 +154,8 @@ export default {
       avatar: null,
       initials: ''
     })
+    const workspaceTree = ref([])
+    const flattenedWorkspaces = ref([])
 
     const currentWorkspace = computed(() => workspaceStore.currentWorkspace)
 
@@ -241,72 +243,58 @@ export default {
       workspaceStore.setUser(demoUser)
     }
 
-    // Load all workspaces assigned to the logged-in user (simplified)
-    const loadUserWorkspaces = async () => {
-      try {
-        const { data: { user }, error: userError } = await supabase.auth.getUser()
-        if (userError || !user) return
-
-        const { data, error } = await supabase
-          .from('workspace_access')
-          .select(`
-            workspace_id,
-            access_type,
-            workspaces (
-              id,
-              title,
-              description
-            )
-          `)
-          .eq('shared_with_user_id', user.id)
-
-        if (error) {
-          console.error('Error fetching assigned workspaces:', error)
-          return
+    // Helper: build tree from flat list
+    const buildWorkspaceTree = (list) => {
+      const nodeMap = new Map()
+      list.forEach(w => {
+        nodeMap.set(w.id, { ...w, children: [] })
+      })
+      const roots = []
+      nodeMap.forEach(node => {
+        if (node.parent_workspace_id && nodeMap.has(node.parent_workspace_id)) {
+          nodeMap.get(node.parent_workspace_id).children.push(node)
+        } else {
+          roots.push(node)
         }
+      })
+      // Optional sort
+      const sortNodes = (nodes) => {
+        nodes.sort((a,b)=>a.title.localeCompare(b.title))
+        nodes.forEach(n=> sortNodes(n.children))
+      }
+      sortNodes(roots)
+      return roots
+    }
 
-        const list = (data || [])
-          .filter(r => r.workspaces)
-          .map(r => ({
-            id: r.workspaces.id.toString(),
-            title: r.workspaces.title,
-            description: r.workspaces.description || 'No description',
-            icon: '📋',
-            accessType: r.access_type
-          }))
+    const flattenTree = (nodes, level = 0, acc = []) => {
+      nodes.forEach(n => {
+        acc.push({ ...n, level })
+        if (n.children && n.children.length) flattenTree(n.children, level + 1, acc)
+      })
+      return acc
+    }
 
-        assignedWorkspaces.value = list
-        availableWorkspaces.value = list
+    // Load hierarchical workspaces via store
+    const loadWorkspaces = async () => {
+      try {
+        const list = await workspaceStore.loadWorkspaces()
+        workspaceTree.value = buildWorkspaceTree(list)
+        flattenedWorkspaces.value = flattenTree(workspaceTree.value)
+        assignedWorkspaces.value = flattenedWorkspaces.value // keep old ref for modal logic
+        availableWorkspaces.value = flattenedWorkspaces.value
 
+        // Set current workspace from route if present
         const workspaceId = (route.params.workspace_id || route.params.workspaceId || '').toString()
         if (workspaceId) {
-          const existing = list.find(w => w.id === workspaceId)
-          if (existing) {
-            workspaceStore.setCurrentWorkspace(existing)
-          } else {
-            // Fallback: fetch directly if not in assigned list (e.g. direct URL access)
-            const { data: directWorkspace } = await supabase
-              .from('workspaces')
-              .select('id, title, description')
-              .eq('id', workspaceId)
-              .single()
-            if (directWorkspace) {
-              workspaceStore.setCurrentWorkspace({
-                id: directWorkspace.id.toString(),
-                title: directWorkspace.title,
-                description: directWorkspace.description || 'No description',
-                icon: '📋',
-                accessType: 'view'
-              })
-            }
+          const found = flattenedWorkspaces.value.find(w => w.id.toString() === workspaceId)
+          if (found) {
+            workspaceStore.setCurrentWorkspace(found)
           }
-        } else if (!currentWorkspace.value && list.length > 0) {
-          workspaceStore.setCurrentWorkspace(list[0])
+        } else if (!currentWorkspace.value && flattenedWorkspaces.value.length) {
+          workspaceStore.setCurrentWorkspace(flattenedWorkspaces.value[0])
         }
-
-        workspaceStore.setWorkspaces(list)
       } catch (e) {
-        console.error('Error loading workspaces:', e)
+        console.error('loadWorkspaces (header) error', e)
       }
     }
 
@@ -425,41 +413,14 @@ export default {
 
     onMounted(async () => {
       await loadUserInfo()
-      await loadUserWorkspaces()
+      await loadWorkspaces()
     })
 
     // Watch for route changes to update current workspace
-    watch(() => route.params.workspace_id, async (newWorkspaceId) => {
-      if (newWorkspaceId && availableWorkspaces.value.length > 0) {
-        const workspace = availableWorkspaces.value.find(w => w.id === newWorkspaceId)
-        if (workspace) {
-          workspaceStore.setCurrentWorkspace(workspace)
-        } else {
-          // Try to load the workspace directly from database
-          try {
-            const { data: directWorkspace } = await supabase
-              .from('workspaces')
-              .select('id, title, description, created_by')
-              .eq('id', newWorkspaceId)
-              .single()
-            
-            if (directWorkspace) {
-              const workspaceObj = {
-                id: directWorkspace.id.toString(),
-                title: directWorkspace.title,
-                description: directWorkspace.description || 'No description',
-                icon: '📋',
-                memberCount: 1,
-                hasAccess: false,
-                accessType: 'view'
-              }
-              workspaceStore.setCurrentWorkspace(workspaceObj)
-            }
-          } catch (error) {
-            console.error('Error loading workspace from URL:', error)
-          }
-        }
-      }
+    watch(() => route.params.workspace_id, (newId) => {
+      if (!newId) return
+      const w = flattenedWorkspaces.value.find(x => x.id.toString() === newId)
+      if (w) workspaceStore.setCurrentWorkspace(w)
     })
 
     return {
@@ -469,6 +430,8 @@ export default {
       availableWorkspaces,
       assignedWorkspaces,
       userInfo,
+      workspaceTree,
+      flattenedWorkspaces,
       handleNavCommand,
       handleUserCommand,
       switchWorkspace,
@@ -706,6 +669,16 @@ export default {
 .workspace-dropdown-item .workspace-icon {
   font-size: 16px;
 }
+
+/* Tree view specific styles */
+.workspace-tree-dropdown {
+  max-height: 400px;
+  overflow-y: auto;
+  min-width: 280px;
+}
+
+.workspace-dropdown-item { display:flex; align-items:center; gap:8px; }
+.workspace-dropdown-item .workspace-icon { width:18px; text-align:center; }
 
 /* Responsive Design */
 @media (max-width: 768px) {
