@@ -183,7 +183,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElNotification, ElMessageBox } from 'element-plus';
 import { Clock, Refresh, Search, Back, Loading, Warning, Check } from '@element-plus/icons-vue';
 import { supabase } from '../supabase';
-import OutlinePointsCt from '../components/single-workspace/OutlinePointsCt.vue';
+import OutlinePointsCt from '../components/OutlinePointsCt.vue';
 import { updateWorkspaceActivity } from '../utils/workspaceActivity';
 import { setOutlineTitle, getCleanText } from '../utils/page-title';
 import { useWorkspaceStore } from '../store/workspace';
