@@ -241,200 +241,13 @@ export default {
       workspaceStore.setUser(demoUser)
     }
 
-    // Load available workspaces from Supabase
-    const loadWorkspaces = async () => {
+    // Load all workspaces assigned to the logged-in user (simplified)
+    const loadUserWorkspaces = async () => {
       try {
-        // Get current user
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) {
-          console.log('No authenticated user found for workspace loading')
-          return
-        }
-
-        // Get all workspaces where user has access or owns
-        const { data: workspaceAccess, error: workspaceAccessError } = await supabase
-          .from('workspace_access')
-          .select(`
-            workspace_id,
-            access_type,
-            workspaces!inner (
-              id,
-              title,
-              description,
-              created_by,
-              created_at
-            )
-          `)
-          .eq('shared_with_user_id', user.id)
-
-        /*const { data: ownedWorkspaces, error: ownedWorkspacesError } = await supabase
-          .from('workspaces')
-          .select('id, title, description, created_by, created_at')
-          .eq('created_by', user.id)*/
-
-        // Combine all workspaces
-        const workspaceMap = new Map()
-
-        // Add assigned workspaces
-        if (workspaceUsers) {
-          workspaceUsers.forEach(wu => {
-            workspaceMap.set(wu.workspace_id, {
-              id: wu.workspace_id.toString(),
-              title: wu.workspaces.title,
-              description: wu.workspaces.description,
-              icon: '�',
-              memberCount: 1, // We'd need a separate query to get actual member count
-              hasAccess: true,
-              accessType: wu.access_type
-            })
-          })
-        }
-
-        // Add owned workspaces
-        if (ownedWorkspaces) {
-          ownedWorkspaces.forEach(workspace => {
-            workspaceMap.set(workspace.id, {
-              id: workspace.id.toString(),
-              title: workspace.title,
-              description: workspace.description,
-              icon: '🏢',
-              memberCount: 1,
-              hasAccess: true,
-              accessType: 'edit'
-            })
-          })
-        }
-
-        availableWorkspaces.value = Array.from(workspaceMap.values())
-
-        // Set current workspace based on route parameter
-        const workspaceId = route.params.workspace_id || route.params.workspaceId
-        if (workspaceId) {
-          const workspace = availableWorkspaces.value.find(w => w.id === workspaceId)
-
-          console.log(`Setting current workspace to ${workspaceId}`, workspace)
-          if (workspace) {
-            workspaceStore.setCurrentWorkspace(workspace)
-          } else {
-            // If workspace not found in user's accessible workspaces, try to load it directly
-            const { data: directWorkspace } = await supabase
-              .from('workspaces')
-              .select('id, title, description, created_by')
-              .eq('id', workspaceId)
-              .single()
-            
-            if (directWorkspace) {
-              const workspaceObj = {
-                id: directWorkspace.id.toString(),
-                title: directWorkspace.title,
-                description: directWorkspace.description || 'No description',
-                icon: '📋',
-                memberCount: 1,
-                hasAccess: false, // User might not have explicit access
-                accessType: 'view'
-              }
-              workspaceStore.setCurrentWorkspace(workspaceObj)
-            }
-          }
-        } else if (!currentWorkspace.value && availableWorkspaces.value.length > 0) {
-          // Default to first workspace if none selected
-          workspaceStore.setCurrentWorkspace(availableWorkspaces.value[0])
-        }
-
-        workspaceStore.setWorkspaces(availableWorkspaces.value)
-
-        // Fallback to demo data if no workspaces found
-        if (availableWorkspaces.value.length === 0) {
-          console.log('No workspaces found, using demo data')
-          availableWorkspaces.value = [
-            {
-              id: '9',
-              title: 'AI Workspace',
-              description: 'Machine learning projects and research',
-              icon: '🤖',
-              memberCount: 12
-            }
-          ]
-          workspaceStore.setWorkspaces(availableWorkspaces.value)
-          workspaceStore.setCurrentWorkspace(availableWorkspaces.value[0])
-        }
-
-      } catch (error) {
-        console.error('Error loading workspaces:', error)
-        
-        // Fallback to demo data
-        availableWorkspaces.value = [
-          {
-            id: '9',
-            title: 'AI Workspace',
-            description: 'Machine learning projects and research',
-            icon: '🤖',
-            memberCount: 12
-          }
-        ]
-        workspaceStore.setWorkspaces(availableWorkspaces.value)
-        workspaceStore.setCurrentWorkspace(availableWorkspaces.value[0])
-      }
-    }
-
-    // Load assigned workspaces from Supabase
-    const loadAssignedWorkspaces = async () => {
-      try {
-        console.log('Starting loadAssignedWorkspaces...')
-        
-        // Check if Supabase is properly configured with real environment variables
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY
-        
-        console.log('Environment Supabase URL:', supabaseUrl)
-        console.log('Environment Supabase Key configured:', !!supabaseKey)
-        
-        if (!supabaseUrl || !supabaseKey || 
-            supabaseUrl.includes('your-project-url') || 
-            supabaseKey.includes('your-anon-key')) {
-          console.log('Supabase not properly configured in environment variables, using demo data')
-          assignedWorkspaces.value = [
-            {
-              id: '9',
-              title: 'AI Workspace',
-              description: 'Machine learning projects and research',
-              icon: '🤖',
-              role: 'admin',
-              hasAccess: true,
-              accessType: 'edit'
-            },
-            {
-              id: '1',
-              title: 'Trading Analysis',
-              description: 'High-frequency trading strategies and market analysis',
-              icon: '📈',
-              role: 'member',
-              hasAccess: true,
-              accessType: 'view'
-            }
-          ]
-          return
-        }
-
-        // Get current user from Supabase auth
-        console.log('Getting current user from Supabase auth...')
         const { data: { user }, error: userError } = await supabase.auth.getUser()
-        
-        if (userError) {
-          console.error('Error getting user:', userError)
-          throw userError
-        }
-        
-        if (!user) {
-          console.log('No authenticated user found')
-          return
-        }
+        if (userError || !user) return
 
-        console.log('Authenticated user found:', user.email, 'User ID:', user.id)
-
-        // Query assigned workspaces using workspace_access table (from your schema)
-        console.log('Querying workspace_access table for user assignments...')
-        const { data: assignedWorkspaceData, error: assignedError } = await supabase
+        const { data, error } = await supabase
           .from('workspace_access')
           .select(`
             workspace_id,
@@ -442,100 +255,58 @@ export default {
             workspaces (
               id,
               title,
-              description,
-              created_by
+              description
             )
           `)
           .eq('shared_with_user_id', user.id)
 
-        console.log('Assigned workspaces query result:', { assignedWorkspaceData, assignedError })
+        if (error) {
+          console.error('Error fetching assigned workspaces:', error)
+          return
+        }
 
-        // Query owned workspaces
-        console.log('Querying workspaces table for owned workspaces...')
-        const { data: ownedWorkspaces, error: ownedError } = await supabase
-          .from('workspaces')
-          .select('id, title, description, created_by, created_at')
-          .eq('created_by', user.id)
+        const list = (data || [])
+          .filter(r => r.workspaces)
+          .map(r => ({
+            id: r.workspaces.id.toString(),
+            title: r.workspaces.title,
+            description: r.workspaces.description || 'No description',
+            icon: '📋',
+            accessType: r.access_type
+          }))
 
-        console.log('Owned workspaces query result:', { ownedWorkspaces, ownedError })
+        assignedWorkspaces.value = list
+        availableWorkspaces.value = list
 
-        // Process and combine workspaces
-        const workspaceMap = new Map()
-
-        // Add assigned workspaces (from workspace_access table)
-        if (assignedWorkspaceData && assignedWorkspaceData.length > 0) {
-          console.log('Processing assigned workspaces:', assignedWorkspaceData)
-          assignedWorkspaceData.forEach(assignment => {
-            if (assignment.workspaces) {
-              workspaceMap.set(assignment.workspace_id, {
-                id: assignment.workspace_id.toString(),
-                title: assignment.workspaces.title,
-                description: assignment.workspaces.description || 'No description',
-                icon: '📋', // Assigned workspace icon
-                role: 'member',
-                hasAccess: true,
-                accessType: assignment.access_type
+        const workspaceId = (route.params.workspace_id || route.params.workspaceId || '').toString()
+        if (workspaceId) {
+          const existing = list.find(w => w.id === workspaceId)
+          if (existing) {
+            workspaceStore.setCurrentWorkspace(existing)
+          } else {
+            // Fallback: fetch directly if not in assigned list (e.g. direct URL access)
+            const { data: directWorkspace } = await supabase
+              .from('workspaces')
+              .select('id, title, description')
+              .eq('id', workspaceId)
+              .single()
+            if (directWorkspace) {
+              workspaceStore.setCurrentWorkspace({
+                id: directWorkspace.id.toString(),
+                title: directWorkspace.title,
+                description: directWorkspace.description || 'No description',
+                icon: '📋',
+                accessType: 'view'
               })
             }
-          })
+          }
+        } else if (!currentWorkspace.value && list.length > 0) {
+          workspaceStore.setCurrentWorkspace(list[0])
         }
 
-        // Add owned workspaces (with higher priority)
-        if (ownedWorkspaces && ownedWorkspaces.length > 0) {
-          console.log('Processing owned workspaces:', ownedWorkspaces)
-          ownedWorkspaces.forEach(workspace => {
-            workspaceMap.set(workspace.id, {
-              id: workspace.id.toString(),
-              title: workspace.title,
-              description: workspace.description || 'No description',
-              icon: '🏢', // Owner icon
-              role: 'owner',
-              hasAccess: true,
-              accessType: 'edit'
-            })
-          })
-        }
-
-        // Convert to array
-        assignedWorkspaces.value = Array.from(workspaceMap.values())
-        console.log('Final assigned workspaces:', assignedWorkspaces.value)
-
-        // If no workspaces found, provide helpful demo data
-        if (assignedWorkspaces.value.length === 0) {
-          console.log('No workspaces found for user, using demo data with database connection note')
-          assignedWorkspaces.value = [
-            {
-              id: '9',
-              title: 'AI Workspace (Connected)',
-              description: 'Connected to database but no workspaces found for this user',
-              icon: '🤖',
-              role: 'admin',
-              hasAccess: true,
-              accessType: 'edit'
-            },
-            {
-              id: '1', 
-              title: 'Create Your First Workspace',
-              description: 'Database connected - click to create your first workspace',
-              icon: '➕',
-              role: 'owner',
-              hasAccess: true,
-              accessType: 'edit'
-            }
-          ]
-        }
-
-      } catch (error) {
-        console.error('Error loading assigned workspaces:', error)
-        console.error('Error details:', {
-          message: error.message,
-          code: error.code,
-          details: error.details,
-          hint: error.hint
-        })
-        
-        // Show user-friendly message about database connection
-        ElMessage.warning('Database connection issue - using demo workspaces. Check console for details.')
+        workspaceStore.setWorkspaces(list)
+      } catch (e) {
+        console.error('Error loading workspaces:', e)
       }
     }
 
@@ -574,7 +345,7 @@ export default {
     const handleUserCommand = (command) => {
       switch (command) {
         case 'profile':
-          ElMessage.info('Profile settings not implemented in demo')
+          ElMessage.info('Profile settings coming soon')
           break
         case 'workspaces':
           workspaceSwitcherVisible.value = true
@@ -643,10 +414,7 @@ export default {
           document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/"
         })
         
-        // In a real app, you would also:
-        // - Call logout API endpoint
-        // - Clear auth tokens from headers
-        // - Redirect to login page
+        // TODO: Call Supabase logout API
         
         ElMessage.success('Signed out successfully')
         router.push('/')
@@ -657,8 +425,7 @@ export default {
 
     onMounted(async () => {
       await loadUserInfo()
-      await loadWorkspaces()
-      await loadAssignedWorkspaces()
+      await loadUserWorkspaces()
     })
 
     // Watch for route changes to update current workspace
