@@ -1,0 +1,901 @@
+<template>
+  <li 
+    class="outline-item" 
+    :data-id="item.id"
+    :class="{ 
+      'dragging': isDragging,
+      'search-match': searchQuery && item.text && item.text.toLowerCase().includes(searchQuery.toLowerCase()),
+      'search-context': searchQuery && !item.text?.toLowerCase().includes(searchQuery.toLowerCase())
+    }"
+    @dragover.prevent.stop="handleDragOver"
+    @dragenter.prevent.stop="handleDragEnter"
+    @dragleave.prevent.stop="handleDragLeave"
+    @drop.prevent.stop="handleDrop"
+    @dragend.prevent.stop="handleDragEnd"
+    tabindex="0"
+  >
+    <div class="outline-row">
+      <!-- Collapse Toggle -->
+      <span 
+        v-if="hasChildren" 
+        class="collapse-toggle"
+        :class="{ collapsed: effectiveCollapsed }"
+        @click="toggleCollapse"
+      >
+        <el-icon><Right /></el-icon>
+      </span>
+
+      <!-- Bullet Point -->
+      <div 
+        class="outline-bullet"
+        @click="startEdit"
+        draggable="true"
+        @dragstart="handleDragStart"
+      ></div>
+
+      <!-- Three Dot Menu -->
+      <el-dropdown 
+        class="three-dot-menu"
+        @command="handleCommand"
+        trigger="click"
+        placement="bottom-start"
+      >
+        <div class="three-dots">
+          <el-icon><MoreFilled /></el-icon>
+        </div>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="delete">
+              <el-icon><Delete /></el-icon>
+              Delete
+            </el-dropdown-item>
+            <el-dropdown-item command="drilldown" v-if="hasChildren">
+              <el-icon><Right /></el-icon>
+              Focus on this
+            </el-dropdown-item>
+            <el-dropdown-item command="comment">
+              <el-icon><ChatDotRound /></el-icon>
+              Comment ({{ comments.length }})
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+
+      <!-- Text Content -->
+      <div 
+        v-if="!editing"
+        class="outline-text"
+        @click="startEdit"
+        @dblclick="startEdit"
+        v-html="highlightedText"
+      ></div>
+
+      <textarea
+        v-else
+        ref="textarea"
+        v-model="editText"
+        class="outline-textarea"
+        @blur="finishEdit"
+        @keydown.enter.exact="handleEnter"
+        @keydown.tab.prevent="handleIndent"
+        @keydown.shift.tab.prevent="handleOutdent"
+        @keydown.backspace="handleBackspace"
+        @input="handleTextChange"
+        @paste="handlePaste"
+        @drop="handleFileDrop"
+        rows="1"
+        placeholder="Type your outline item..."
+      />
+
+      <!-- Comment Icon -->
+      <el-icon 
+        v-if="hasComments" 
+        class="comment-icon"
+        @click="openCommentDialog"
+        color="#ff9800"
+      >
+        <ChatDotRound />
+      </el-icon>
+    </div>
+
+    <!-- Drop Indicators -->
+    <div
+      v-show="isDragOverTop"
+      class="drop-indicator indicator-top"
+    ></div>
+    <div
+      v-show="isDragOverBottom"
+      class="drop-indicator indicator-bottom"
+    ></div>
+    <div
+      v-show="isDragOverChild && hasChildren"
+      class="drop-indicator indicator-child"
+    ></div>
+
+    <!-- File Preview Section -->
+    <div v-if="item.fileUrl" class="file-preview">
+      <img 
+        v-if="isImageFile(item.text)" 
+        :src="item.fileUrl" 
+        :alt="getFileName(item.text)"
+        class="preview-image"
+        @click="openImagePreview"
+      />
+      <div v-else class="file-info">
+        <span class="file-name">{{ getFileName(item.text) }}</span>
+        <el-button size="small" @click="downloadFile">Download</el-button>
+      </div>
+    </div>
+
+    <!-- Comment Dialog -->
+    <el-dialog v-model="commentDialogVisible" title="Comments" width="350px">
+      <div class="comments-list">
+        <div v-for="comment in comments" :key="comment.id" class="comment-item">
+          <div v-if="comment.editing">
+            <el-input
+              v-model="comment.text"
+              type="textarea"
+              rows="2"
+              class="comment-edit-textarea"
+            />
+            <div class="comment-actions">
+              <el-button size="small" @click="saveComment(comment)">Save</el-button>
+              <el-button size="small" @click="cancelEditComment(comment)">Cancel</el-button>
+            </div>
+          </div>
+          <div v-else>
+            <p>{{ comment.text }}</p>
+            <div class="comment-actions">
+              <el-button size="small" @click="editComment(comment)">Edit</el-button>
+              <el-button size="small" type="danger" @click="deleteComment(comment.id)">Delete</el-button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="add-comment-section">
+        <el-input
+          v-model="newCommentText"
+          type="textarea"
+          rows="2"
+          placeholder="Add a comment..."
+          class="comment-add-textarea"
+        />
+        <el-button @click="addComment" :disabled="!newCommentText.trim()">Add Comment</el-button>
+      </div>
+    </el-dialog>
+
+    <!-- Image Preview Dialog -->
+    <el-dialog
+      v-model="imagePreviewVisible"
+      :show-close="true"
+      class="image-preview-dialog"
+      width="80%"
+    >
+      <img 
+        v-if="item.fileUrl && isImageFile(item.text)" 
+        :src="item.fileUrl" 
+        class="preview-image-full"
+        :alt="getFileName(item.text)"
+      />
+    </el-dialog>
+
+    <!-- Child Items -->
+    <ul v-if="hasChildren && !effectiveCollapsed" class="outline-list">
+      <OutlinePointsCt
+        v-for="child in item.children"
+        :key="child.id"
+        :item="child"
+        :readonly="readonly"
+        :auto-focus="child.autoFocus"
+        :collapsed="isNodeCollapsed(child.id)"
+        :is-node-collapsed="isNodeCollapsed"
+        :check-version-before-edit="checkVersionBeforeEdit"
+        :handle-version-conflict="handleVersionConflict"
+        :search-query="searchQuery"
+        @update="updateChild"
+        @move="handleMove"
+        @delete="handleDelete"
+        @drilldown="handleDrilldown"
+        @navigate="handleNavigate"
+        @indent="handleIndent"
+        @outdent="handleOutdent"
+        @add-sibling="handleAddSibling"
+        @collapse-toggle="handleCollapseToggle"
+      />
+    </ul>
+  </li>
+</template>
+
+<script>
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { Plus, ArrowRight, Delete, MoreFilled, ChatDotRound, Link, Right, Back } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { dragState } from './dragState.js'
+
+export default {
+  name: 'OutlinePointsCt',
+  components: { Plus, ArrowRight, Delete, MoreFilled, ChatDotRound, Link, Right, Back },
+  props: {
+    item: { type: Object, required: true },
+    readonly: { type: Boolean, default: false },
+    autoFocus: { type: Boolean, default: false },
+    collapsed: { type: Boolean, default: false },
+    isNodeCollapsed: { type: Function, default: () => () => false },
+    checkVersionBeforeEdit: { type: Function, default: () => async () => ({ canEdit: true }) },
+    handleVersionConflict: { type: Function, default: () => async () => ({ canEdit: true }) },
+    searchQuery: { type: String, default: '' }
+  },
+  emits: ['update', 'move', 'delete', 'drilldown', 'navigate', 'indent', 'outdent', 'add-sibling', 'collapse-toggle'],
+  setup(props, { emit }) {
+    const editing = ref(false)
+    const editText = ref('')
+    const textarea = ref(null)
+    const commentDialogVisible = ref(false)
+    const imagePreviewVisible = ref(false)
+    const comments = ref([])
+    const newCommentText = ref('')
+    const isDragging = ref(false)
+
+    const hasChildren = computed(() => {
+      return props.item.children && props.item.children.length > 0
+    })
+
+    const effectiveCollapsed = computed(() => {
+      return props.isNodeCollapsed(props.item.id)
+    })
+
+    const isDragOverTop = computed(() => {
+      return dragState.hoveredId === props.item.id && dragState.hoveredPosition === 'top'
+    })
+
+    const isDragOverBottom = computed(() => {
+      return dragState.hoveredId === props.item.id && dragState.hoveredPosition === 'bottom'
+    })
+
+    const isDragOverChild = computed(() => {
+      return dragState.hoveredId === props.item.id && dragState.hoveredPosition === 'child'
+    })
+
+    const hasComments = computed(() => {
+      return comments.value && comments.value.length > 0
+    })
+
+    const highlightedText = computed(() => {
+      if (!props.searchQuery || !props.item.text) {
+        return props.item.text || 'Click to edit...'
+      }
+      
+      const text = props.item.text
+      const query = props.searchQuery.toLowerCase()
+      const index = text.toLowerCase().indexOf(query)
+      
+      if (index === -1) {
+        return text
+      }
+      
+      const before = text.substring(0, index)
+      const match = text.substring(index, index + query.length)
+      const after = text.substring(index + query.length)
+      
+      return `${before}<span class="search-highlight">${match}</span>${after}`
+    })
+
+    const startEdit = async () => {
+      if (props.readonly) return
+      
+      const versionCheck = await props.checkVersionBeforeEdit()
+      if (!versionCheck.canEdit) {
+        const conflictResult = await props.handleVersionConflict(versionCheck)
+        if (!conflictResult.canEdit) return
+      }
+
+      editing.value = true
+      editText.value = props.item.text || ''
+      
+      // Focus textarea on next tick
+      setTimeout(() => {
+        if (textarea.value) {
+          textarea.value.focus()
+          autoResize()
+        }
+      }, 0)
+    }
+
+    const finishEdit = () => {
+      if (!editing.value) return
+      
+      editing.value = false
+      if (editText.value !== props.item.text) {
+        emit('update', {
+          id: props.item.id,
+          text: editText.value,
+          immediate: true
+        })
+      }
+    }
+
+    const handleTextChange = () => {
+      autoResize()
+      // Emit update immediately for real-time collaboration
+      emit('update', {
+        id: props.item.id,
+        text: editText.value,
+        immediate: true
+      })
+    }
+
+    const autoResize = () => {
+      if (textarea.value) {
+        textarea.value.style.height = 'auto'
+        textarea.value.style.height = textarea.value.scrollHeight + 'px'
+      }
+    }
+
+    const handleEnter = () => {
+      finishEdit()
+      emit('add-sibling', { id: props.item.id })
+    }
+
+    const handleIndent = () => {
+      emit('indent', { id: props.item.id })
+    }
+
+    const handleOutdent = () => {
+      emit('outdent', { id: props.item.id })
+    }
+
+    const handleBackspace = (e) => {
+      if (editText.value === '' && e.target.selectionStart === 0) {
+        e.preventDefault()
+        finishEdit()
+        emit('delete', props.item.id)
+      }
+    }
+
+    const handleCommand = (command) => {
+      switch (command) {
+        case 'delete':
+          handleDelete()
+          break
+        case 'drilldown':
+          emit('drilldown', props.item.id)
+          break
+        case 'comment':
+          openCommentDialog()
+          break
+      }
+    }
+
+    const handleDelete = () => {
+      ElMessageBox.confirm('Are you sure you want to delete this item?', 'Confirm Delete', {
+        type: 'warning'
+      }).then(() => {
+        emit('delete', props.item.id)
+      }).catch(() => {
+        // User cancelled
+      })
+    }
+
+    const toggleCollapse = () => {
+      emit('collapse-toggle', props.item.id, !props.collapsed)
+    }
+
+    // Drag and Drop handlers
+    const handleDragStart = (e) => {
+      dragState.draggedId = props.item.id
+      dragState.isDragging = true
+      isDragging.value = true
+      e.dataTransfer.effectAllowed = 'move'
+    }
+
+    const handleDragEnd = (e) => {
+      dragState.draggedId = null
+      dragState.hoveredId = null
+      dragState.hoveredPosition = null
+      dragState.isDragging = false
+      isDragging.value = false
+    }
+
+    const handleDragEnter = (e) => {
+      if (dragState.draggedId === props.item.id) return
+      
+      dragState.hoveredId = props.item.id
+      dragState.hoveredPosition = getDropPosition(e)
+    }
+
+    const handleDragOver = (e) => {
+      if (dragState.draggedId === props.item.id) return
+      
+      dragState.hoveredPosition = getDropPosition(e)
+    }
+
+    const handleDragLeave = (e) => {
+      // Only clear if we're leaving the entire item
+      if (!e.currentTarget.contains(e.relatedTarget)) {
+        dragState.hoveredId = null
+        dragState.hoveredPosition = null
+      }
+    }
+
+    const handleDrop = (e) => {
+      if (dragState.draggedId === props.item.id) return
+      
+      const position = getDropPosition(e)
+      emit('move', {
+        draggedId: dragState.draggedId,
+        targetId: props.item.id,
+        position: position
+      })
+      
+      dragState.hoveredId = null
+      dragState.hoveredPosition = null
+    }
+
+    const getDropPosition = (e) => {
+      const rect = e.currentTarget.getBoundingClientRect()
+      const y = e.clientY - rect.top
+      const height = rect.height
+      
+      if (y < height * 0.25) {
+        return 'top'
+      } else if (y > height * 0.75) {
+        return 'bottom'
+      } else {
+        return 'child'
+      }
+    }
+
+    // Comment functionality
+    const openCommentDialog = () => {
+      commentDialogVisible.value = true
+      loadComments()
+    }
+
+    const loadComments = () => {
+      // In a real app, this would load from the database
+      comments.value = [
+        {
+          id: 1,
+          text: 'This is a sample comment',
+          editing: false
+        }
+      ]
+    }
+
+    const addComment = () => {
+      if (!newCommentText.value.trim()) return
+      
+      const newComment = {
+        id: Date.now(),
+        text: newCommentText.value,
+        editing: false
+      }
+      comments.value.push(newComment)
+      newCommentText.value = ''
+      ElMessage.success('Comment added')
+    }
+
+    const editComment = (comment) => {
+      comment.editing = true
+      comment.originalText = comment.text
+    }
+
+    const saveComment = (comment) => {
+      comment.editing = false
+      delete comment.originalText
+      ElMessage.success('Comment updated')
+    }
+
+    const cancelEditComment = (comment) => {
+      comment.editing = false
+      comment.text = comment.originalText
+      delete comment.originalText
+    }
+
+    const deleteComment = (commentId) => {
+      const index = comments.value.findIndex(c => c.id === commentId)
+      if (index > -1) {
+        comments.value.splice(index, 1)
+        ElMessage.success('Comment deleted')
+      }
+    }
+
+    // File handling
+    const handlePaste = async (e) => {
+      const items = e.clipboardData.items
+      for (let item of items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile()
+          await handleFileDrop(file)
+        }
+      }
+    }
+
+    const handleFileDrop = async (file) => {
+      // In a real app, this would upload to a storage service
+      console.log('File dropped:', file)
+      ElMessage.info('File upload functionality not implemented in demo')
+    }
+
+    const isImageFile = (text) => {
+      if (!text) return false
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg']
+      const fileName = text.replace('📎', '').trim()
+      return imageExtensions.some(ext => fileName.toLowerCase().endsWith(ext))
+    }
+
+    const getFileName = (text) => {
+      return text.replace('📎', '').trim()
+    }
+
+    const openImagePreview = () => {
+      imagePreviewVisible.value = true
+    }
+
+    const downloadFile = () => {
+      if (props.item.fileUrl) {
+        window.open(props.item.fileUrl, '_blank')
+      }
+    }
+
+    // Pass-through event handlers
+    const updateChild = (payload) => {
+      emit('update', payload)
+    }
+
+    const handleMove = (payload) => {
+      emit('move', payload)
+    }
+
+    const handleDrilldown = (id) => {
+      emit('drilldown', id)
+    }
+
+    const handleNavigate = (payload) => {
+      emit('navigate', payload)
+    }
+
+    const handleAddSibling = (payload) => {
+      emit('add-sibling', payload)
+    }
+
+    const handleCollapseToggle = (nodeId, isCollapsed) => {
+      emit('collapse-toggle', nodeId, isCollapsed)
+    }
+
+    onMounted(() => {
+      if (props.autoFocus) {
+        startEdit()
+      }
+    })
+
+    return {
+      editing,
+      editText,
+      textarea,
+      commentDialogVisible,
+      imagePreviewVisible,
+      comments,
+      newCommentText,
+      isDragging,
+      hasChildren,
+      effectiveCollapsed,
+      isDragOverTop,
+      isDragOverBottom,
+      isDragOverChild,
+      hasComments,
+      highlightedText,
+      startEdit,
+      finishEdit,
+      handleTextChange,
+      autoResize,
+      handleEnter,
+      handleIndent,
+      handleOutdent,
+      handleBackspace,
+      handleCommand,
+      handleDelete,
+      toggleCollapse,
+      handleDragStart,
+      handleDragEnd,
+      handleDragEnter,
+      handleDragOver,
+      handleDragLeave,
+      handleDrop,
+      getDropPosition,
+      openCommentDialog,
+      loadComments,
+      addComment,
+      editComment,
+      saveComment,
+      cancelEditComment,
+      deleteComment,
+      handlePaste,
+      handleFileDrop,
+      isImageFile,
+      getFileName,
+      openImagePreview,
+      downloadFile,
+      updateChild,
+      handleMove,
+      handleDrilldown,
+      handleNavigate,
+      handleAddSibling,
+      handleCollapseToggle
+    }
+  }
+}
+</script>
+
+<style scoped>
+.outline-item {
+  display: block;
+  margin: 0 2rem;
+  position: relative;
+  max-width: 100%;
+  transition: all 0.2s ease;
+  margin-right: 0px;
+}
+
+.outline-row {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  min-height: 25px;
+}
+
+.outline-text,
+.outline-textarea {
+  padding-right: 32px;
+}
+
+.drop-indicator {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #1976d2;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.drop-indicator.indicator-top {
+  top: -1px;
+  opacity: 1;
+}
+
+.drop-indicator.indicator-bottom {
+  bottom: -1px;
+  opacity: 1;
+}
+
+.drop-indicator.indicator-child {
+  left: 0;
+  right: 0;
+  width: auto;
+  bottom: -1px;
+  height: 2px;
+  background: #1976d2;
+  opacity: 1;
+  border-radius: 2px;
+}
+
+.outline-item.dragging {
+  opacity: 0.5;
+  cursor: move;
+}
+
+.outline-bullet {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4B5155;
+  display: inline-block;
+  margin-right: 9px;
+  vertical-align: top;
+  border: 2px solid #e3eaf6;
+  margin-left: -18px;
+  margin-top: 5px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.outline-bullet:hover {
+  background: #23272f;
+  border-color: #4B5155;
+  transform: scale(1.2);
+}
+
+.collapse-toggle {
+  display: inline-block;
+  width: 20px;
+  cursor: pointer;
+  user-select: none;
+  margin-left: 0;
+  font-size: 10px;
+  vertical-align: baseline;
+  margin-right: 16px;
+  margin-top: 0;
+  color: #4B5155;
+  transition: transform 0.2s ease;
+}
+
+.collapse-toggle.collapsed {
+  transform: rotate(-90deg);
+}
+
+.outline-text {
+  display: inline-block;
+  width: calc(90% - 50px);
+  font-size: 0.95rem;
+  font-weight: normal;
+  color: #2a3135;
+  cursor: pointer;
+  vertical-align: baseline;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.outline-textarea {
+  display: inline-block;
+  width: calc(90% - 50px);
+  max-width: 90%;
+  font-size: 1rem;
+  font-weight: normal;
+  color: #2a3135;
+  border: 0px;
+  margin: 0;
+  outline: none;
+  min-width: 100px;
+  margin-bottom: 0.1rem;
+  vertical-align: baseline;
+  resize: none;
+  overflow: hidden;
+  line-height: 1.2;
+  padding: 0;
+  font-family: inherit;
+  background: transparent;
+}
+
+.three-dot-menu {
+  margin-right: 5px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  margin-top: 5px;
+  margin-left: -24px;
+}
+
+.outline-row:hover .three-dot-menu {
+  opacity: 1;
+}
+
+.three-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  color: #666;
+  font-size: 14px;
+}
+
+.three-dots:hover {
+  background-color: #f5f5f5;
+  color: #333;
+}
+
+.comment-icon {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: 8px;
+  cursor: pointer;
+  font-size: 1.1em;
+  vertical-align: middle;
+  z-index: 2;
+}
+
+.file-preview {
+  margin: 8px 0;
+  padding: 8px;
+  border-radius: 4px;
+  background: transparent;
+  width: auto;
+}
+
+.preview-image {
+  max-width: 200px;
+  max-height: 200px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.preview-image:hover {
+  transform: scale(1.02);
+}
+
+.preview-image-full {
+  max-width: 100%;
+  max-height: 80vh;
+  object-fit: contain;
+}
+
+.file-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.file-name {
+  flex: 1;
+  color: #606266;
+}
+
+.comments-list {
+  margin-bottom: 10px;
+}
+
+.comment-item {
+  margin-bottom: 8px;
+  background: #f5f7fa;
+  border-radius: 4px;
+  padding: 6px;
+}
+
+.comment-edit-textarea {
+  width: 100%;
+  font-size: 0.95em;
+  margin-bottom: 8px;
+  border-radius: 3px;
+  border: 1px solid #e0e0e0;
+  resize: vertical;
+  padding: 8px;
+}
+
+.comment-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.add-comment-section {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.comment-add-textarea {
+  width: 100%;
+  font-size: 0.95em;
+  border-radius: 3px;
+  border: 1px solid #e0e0e0;
+  resize: vertical;
+  margin-bottom: 4px;
+}
+
+/* Search highlighting styles */
+.search-highlight {
+  background-color: #ffeb3b;
+  color: #000;
+  font-weight: 600;
+  padding: 1px 2px;
+  border-radius: 2px;
+}
+
+.outline-text.search-match {
+  background-color: rgba(255, 235, 59, 0.1);
+  border-radius: 3px;
+  padding: 1px 3px;
+}
+
+.outline-text.search-context {
+  opacity: 0.7;
+}
+</style>
