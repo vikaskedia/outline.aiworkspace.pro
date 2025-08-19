@@ -535,8 +535,9 @@ export default {
     function updateTextById(items, id, text, extra = {}) {
       for (const item of items) {
         if (item.id === id) {
-          item.text = text;
+          if (text !== undefined) item.text = text;
           if (extra.comments) item.comments = extra.comments;
+          if (Object.prototype.hasOwnProperty.call(extra, 'fileUrl')) item.fileUrl = extra.fileUrl; // persist image data URL
           item.updated_at = new Date().toISOString();
           return true;
         }
@@ -589,8 +590,8 @@ export default {
       return null;
     }
 
-    function onOutlineUpdate({ id, text, comments, immediate }) {
-      updateTextById(outline.value, id, text, { comments });
+    function onOutlineUpdate({ id, text, comments, fileUrl, immediate }) {
+      updateTextById(outline.value, id, text, { comments, fileUrl });
       hasChanges.value = checkForChanges(outline.value);
       debouncedSave();
     }

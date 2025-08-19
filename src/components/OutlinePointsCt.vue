@@ -392,6 +392,141 @@ export default {
       return props.item.fileUrl + (hasQuery ? '&' : '?') + 'token=' + encodeURIComponent(token)
     })
 
+    // --- Gitea Image Upload Helpers (updated to work with only host + token) ---
+    const giteaState = { ensured: false, owner: null, repo: null }
+
+    const readFileAsBase64 = (file) => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const result = reader.result || ''
+            const base64 = result.split(',')[1] || ''
+            resolve(base64)
+          } catch (err) { reject(err) }
+        }
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+    }
+
+    const buildGiteaRawUrl = ({ host, owner, repo, branch, path, downloadUrl }) => {
+      if (downloadUrl) return downloadUrl
+      return `${host.replace(/\/$/, '')}/api/v1/repos/${owner}/${repo}/raw/${branch}/${path}`
+    }
+
+    const ensureGiteaRepo = async () => {
+      if (giteaState.ensured && giteaState.owner && giteaState.repo) return giteaState
+      const host = import.meta.env.VITE_GITEA_HOST || import.meta.env.VITE_GITEA_BASE_URL
+      const token = import.meta.env.VITE_GITEA_TOKEN
+      const desiredRepo = import.meta.env.VITE_GITEA_REPO_NAME || 'outline-assets'
+      const branch = import.meta.env.VITE_GITEA_REPO_BRANCH || 'main'
+      if (!host || !token) return { error: 'missing-config' }
+      try {
+        // Get current user login
+        const userRes = await fetch(`${host.replace(/\/$/, '')}/api/v1/user`, { headers: { Authorization: `token ${token}` } })
+        if (!userRes.ok) {
+          return { error: 'user-fetch-failed', status: userRes.status }
+        }
+        const userJson = await userRes.json()
+        const owner = userJson.login
+        // Check repo existence
+        const repoRes = await fetch(`${host.replace(/\/$/, '')}/api/v1/repos/${owner}/${desiredRepo}`, { headers: { Authorization: `token ${token}` } })
+        if (repoRes.status === 404) {
+          // Create repo
+          const createRes = await fetch(`${host.replace(/\/$/, '')}/api/v1/user/repos`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `token ${token}` },
+            body: JSON.stringify({ name: desiredRepo, private: true, description: 'Outline image assets', auto_init: false })
+          })
+          if (!createRes.ok) {
+            console.error('Failed to create repo', await createRes.text())
+            return { error: 'repo-create-failed' }
+          }
+        } else if (!repoRes.ok && repoRes.status !== 200) {
+          return { error: 'repo-check-failed', status: repoRes.status }
+        }
+        giteaState.ensured = true
+        giteaState.owner = owner
+        giteaState.repo = desiredRepo
+        return { owner, repo: desiredRepo, branch, host }
+      } catch (e) {
+        console.error('ensureGiteaRepo error', e)
+        return { error: 'exception', detail: e }
+      }
+    }
+
+    const uploadImageToGitea = async (file) => {
+      const host = import.meta.env.VITE_GITEA_HOST || import.meta.env.VITE_GITEA_BASE_URL
+      const token = import.meta.env.VITE_GITEA_TOKEN
+      const branch = import.meta.env.VITE_GITEA_REPO_BRANCH || 'main'
+      if (!host || !token) {
+        return { success: false, reason: 'missing-config' }
+      }
+      const ensure = await ensureGiteaRepo()
+      if (ensure.error) {
+        if (ensure.error === 'missing-config') return { success: false, reason: 'missing-config' }
+        console.warn('Repo ensure failed, fallback to inline', ensure)
+        return { success: false, reason: 'ensure-failed', detail: ensure.error }
+      }
+      const { owner, repo } = ensure
+      try {
+        const safeOriginal = file.name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'image.png'
+        const ts = Date.now()
+        const rand = Math.random().toString(36).slice(2, 8)
+        const ext = (safeOriginal.split('.').pop() || 'png').toLowerCase()
+        const path = `outline-images/${ts}-${rand}.${ext}`
+        const base64 = await readFileAsBase64(file)
+        const apiUrl = `${host.replace(/\/$/, '')}/api/v1/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`
+        const res = await fetch(apiUrl, {
+          method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `token ${token}`
+            },
+            body: JSON.stringify({ content: base64, message: `Add outline image ${safeOriginal}`, branch })
+        })
+        const json = await res.json()
+        if (!res.ok) {
+          console.error('Gitea upload failed', json)
+          return { success: false, reason: 'upload-failed', error: json }
+        }
+        const downloadUrl = json?.content?.download_url
+        const rawUrl = buildGiteaRawUrl({ host, owner, repo, branch, path, downloadUrl })
+        return { success: true, url: rawUrl, filename: path }
+      } catch (err) {
+        console.error('Gitea upload error', err)
+        return { success: false, reason: 'exception', error: err }
+      }
+    }
+
+    // Replace previous data-URL only implementation (updated)
+    const processImageFile = async (file) => {
+      ElMessage.info('Uploading image...')
+      const giteaResult = await uploadImageToGitea(file)
+      if (giteaResult.success) {
+        emit('update', { id: props.item.id, text: giteaResult.filename, fileUrl: giteaResult.url, immediate: true })
+        ElMessage.success('Image uploaded')
+        return
+      }
+      if (giteaResult.reason === 'missing-config') {
+        try {
+          const reader = new FileReader()
+          reader.onload = () => {
+            const ext = (file.name.split('.').pop() || 'png').toLowerCase()
+            const fileName = `pasted-image-${Date.now()}.${ext}`
+            emit('update', { id: props.item.id, text: fileName, fileUrl: reader.result, immediate: true })
+            ElMessage.success('Image added (inline)')
+          }
+          reader.readAsDataURL(file)
+        } catch (e) {
+          ElMessage.error('Image add failed')
+        }
+      } else {
+        ElMessage.error('Upload failed; check console')
+      }
+    }
+
     const handleCommand = (command) => {
       switch (command) {
         case 'delete':
@@ -487,15 +622,21 @@ export default {
     }
 
     const handleDrop = (e) => {
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+        const fileList = Array.from(e.dataTransfer.files);
+        const imageFile = fileList.find(f => f.type.startsWith('image/'));
+        if (imageFile) {
+          e.preventDefault();
+          e.stopPropagation();
+          processImageFile(imageFile); // now uploads to Gitea
+          dragState.hoveredId = null;
+          dragState.hoveredPosition = null;
+          return;
+        }
+      }
       if (dragState.draggedId === props.item.id) return
-      
       const position = getDropPosition(e)
-      emit('move', {
-        draggedId: dragState.draggedId,
-        targetId: props.item.id,
-        position: position
-      })
-      
+      emit('move', { draggedId: dragState.draggedId, targetId: props.item.id, position })
       dragState.hoveredId = null
       dragState.hoveredPosition = null
     }
@@ -572,20 +713,25 @@ export default {
 
     // File handling
     const handlePaste = async (e) => {
-      const items = e.clipboardData.items
+      const items = e.clipboardData?.items || [];
       for (let item of items) {
         if (item.type.startsWith('image/')) {
-          const file = item.getAsFile()
-          await handleFileDrop(file)
+          const file = item.getAsFile();
+          if (file) await processImageFile(file); // now uploads to Gitea
         }
       }
-    }
+    };
 
-    const handleFileDrop = async (file) => {
-      // In a real app, this would upload to a storage service
-      console.log('File dropped:', file)
-      ElMessage.info('File upload functionality not implemented in demo')
-    }
+    const handleFileDrop = async (fileOrEvent) => {
+      let file = null;
+      if (fileOrEvent instanceof File) {
+        file = fileOrEvent;
+      } else if (fileOrEvent?.dataTransfer?.files?.length) {
+        file = Array.from(fileOrEvent.dataTransfer.files).find(f => f.type.startsWith('image/'));
+      }
+      if (!file) return;
+      await processImageFile(file); // now uploads to Gitea
+    };
 
     const isImageFile = (text) => {
       if (!text) return false
@@ -704,7 +850,8 @@ export default {
       handleAddSibling,
       handleCollapseToggle,
       imageSrc,
-      copyInternalLink
+      copyInternalLink,
+      processImageFile
     }
   }
 }
