@@ -355,8 +355,13 @@ export default {
         
         default:
           // Redirect to main app.aiworkspace.pro for all other items
-          const mainAppUrl = `https://app.aiworkspace.pro/single-workspace/${workspace ? workspace.id : ''}/${item.key}`
-          window.location.href = mainAppUrl
+          if (workspace) {
+            const mainAppUrl = `https://app.aiworkspace.pro/single-workspace/${workspace.id}/${item.key}`
+            window.location.href = mainAppUrl
+          } else {
+            const mainAppUrl = `https://app.aiworkspace.pro/${item.key}`
+            window.location.href = mainAppUrl
+          }
           break
       }
     }
