@@ -1,4 +1,13 @@
 import { createClient } from '@supabase/supabase-js'
+import { ensureCrossSubdomainCookies, ACCESS_COOKIE, REFRESH_COOKIE } from './utils/authRedirect'
+
+if (typeof window !== 'undefined') {
+  try {
+    ensureCrossSubdomainCookies([ACCESS_COOKIE, REFRESH_COOKIE])
+  } catch (e) {
+    console.log('[auth][cookie][promote] error (pre-init)', e)
+  }
+}
 
 // Use environment variables for Supabase configuration
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project-url.supabase.co'
