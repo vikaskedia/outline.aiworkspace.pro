@@ -22,7 +22,8 @@
         :class="{ collapsed: effectiveCollapsed }"
         @click="toggleCollapse"
       >
-        <el-icon><Right /></el-icon>
+        <el-icon v-if="effectiveCollapsed"><CaretRight /></el-icon>
+        <el-icon v-else><CaretBottom /></el-icon>
       </span>
 
       <!-- Bullet Point -->
@@ -53,14 +54,13 @@
               <el-icon><Plus /></el-icon>
               Add Sibling Below
             </el-dropdown-item>
-            <el-dropdown-item command="indent">
-              ➡️ Indent
-            </el-dropdown-item>
-            <el-dropdown-item command="outdent">
-              ⬅️ Outdent
-            </el-dropdown-item>
+            <el-dropdown-item command="indent">➡️ Indent</el-dropdown-item>
+            <el-dropdown-item command="outdent">⬅️ Outdent</el-dropdown-item>
             <el-dropdown-item v-if="hasChildren" command="collapse">
-              <el-icon><ArrowRight /></el-icon>
+              <el-icon>
+                <CaretRight v-if="effectiveCollapsed" />
+                <CaretBottom v-else />
+              </el-icon>
               {{ effectiveCollapsed ? 'Expand' : 'Collapse' }}
             </el-dropdown-item>
             <el-dropdown-item v-if="hasChildren" command="drilldown">
@@ -230,13 +230,13 @@
 
 <script>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
-import { Plus, ArrowRight, Delete, MoreFilled, ChatDotRound, Link, Right, Back } from '@element-plus/icons-vue'
+import { Plus, Delete, MoreFilled, ChatDotRound, Link, Right, Back, CaretRight, CaretBottom } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { dragState } from './dragState.js'
 
 export default {
   name: 'OutlinePointsCt',
-  components: { Plus, ArrowRight, Delete, MoreFilled, ChatDotRound, Link, Right, Back },
+  components: { Plus, Delete, MoreFilled, ChatDotRound, Link, Right, Back, CaretRight, CaretBottom },
   props: {
     item: { type: Object, required: true },
     readonly: { type: Boolean, default: false },
@@ -723,8 +723,8 @@ export default {
 .outline-row {
   position: relative;
   display: flex;
-  align-items: baseline;
-  min-height: 25px;
+  align-items: center;
+  min-height: 24px;
 }
 
 .outline-text,
@@ -796,22 +796,22 @@ export default {
   cursor: pointer;
   user-select: none;
   margin-left: 0;
-  font-size: 10px;
+  font-size: 16px;
   vertical-align: baseline;
-  margin-right: 16px;
+  margin-right: 20px;
   margin-top: 0;
   color: #4B5155;
   transition: transform 0.2s ease;
 }
 
 .collapse-toggle.collapsed {
-  transform: rotate(-90deg);
+  transform: none;
 }
 
 .outline-text {
   display: inline-block;
   width: calc(90% - 50px);
-  font-size: 0.95rem;
+  font-size: 0.90rem;
   font-weight: normal;
   color: #2a3135;
   cursor: pointer;
