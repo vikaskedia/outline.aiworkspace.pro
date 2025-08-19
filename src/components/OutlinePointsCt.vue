@@ -17,13 +17,13 @@
     <div class="outline-row">
       <!-- Collapse Toggle -->
       <span 
-        v-if="hasChildren" 
         class="collapse-toggle"
         :class="{ collapsed: effectiveCollapsed }"
-        @click="toggleCollapse"
+        @click="toggleCollapse" 
       >
-        <el-icon v-if="effectiveCollapsed"><CaretRight /></el-icon>
-        <el-icon v-else><CaretBottom /></el-icon>
+        <el-icon v-if="effectiveCollapsed && hasChildren"><CaretRight /></el-icon>
+        <el-icon v-else-if="hasChildren"><CaretBottom /></el-icon>
+        <el-icon v-else style="display: none;"><CaretBottom /></el-icon>
       </span>
 
       <!-- Bullet Point -->
@@ -726,7 +726,11 @@ export default {
   align-items: center;
   min-height: 24px;
 }
-
+.outline-item ul {
+    margin-left: 5px;
+    padding-left: 0;
+    border-left: 1px solid #ECEEF0;
+}
 .outline-text,
 .outline-textarea {
   padding-right: 32px;
@@ -795,7 +799,7 @@ export default {
   width: 20px;
   cursor: pointer;
   user-select: none;
-  margin-left: 0;
+  margin-left: -3px;
   font-size: 16px;
   vertical-align: baseline;
   margin-right: 20px;
@@ -842,12 +846,12 @@ export default {
 }
 
 .three-dot-menu {
-  margin-right: 30px;
+  margin-right: 36px;
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.2s ease;
   margin-top: 0;
-  margin-left: -55px;
+  margin-left: -60px;
 }
 
 .outline-row:hover .three-dot-menu {

@@ -83,7 +83,13 @@
           Synced {{ formatDate(lastSaveTime) }}
         </span>
         <span style="color: #7f8c8d; margin-left: 10px;">
-          v{{ displayVersion }}
+          <el-tag 
+            type="success" 
+            size="small"
+            effect="light"
+          >
+            v{{ displayVersion }}
+          </el-tag>
         </span>
       </div>
     </div>
