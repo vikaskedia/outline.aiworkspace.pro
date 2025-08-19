@@ -1096,7 +1096,7 @@ export default {
 <style scoped>
 .outline-item {
   display: block;
-  margin: 0 2rem;
+  margin: 5px 2rem;
   position: relative;
   max-width: 100%;
   transition: all 0.2s ease;
@@ -1106,7 +1106,6 @@ export default {
 .outline-row {
   position: relative;
   display: flex;
-  align-items: center;
   min-height: 24px;
 }
 .outline-item ul {
@@ -1166,7 +1165,7 @@ export default {
   vertical-align: top;
   border: 2px solid #e3eaf6;
   margin-left: -22px;
-  margin-top: 0;
+  margin-top: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
