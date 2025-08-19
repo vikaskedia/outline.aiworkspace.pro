@@ -105,9 +105,34 @@
         @input="handleTextChange"
         @paste="handlePaste"
         @drop="handleFileDrop"
+        @mouseup="handleSelection"
+        @keyup="handleSelection"
         rows="1"
         placeholder="Type your outline item..."
       />
+
+      <!-- Selection Tooltip -->
+      <div
+        v-if="selectionTooltipVisible"
+        class="selection-tooltip"
+        :style="selectionTooltipStyle"
+        @mousedown.prevent
+      >
+        <button class="tooltip-button" @click="openLinkDialog" title="Add link (⌘+K)">🔗 Link</button>
+        <button class="tooltip-button" @click="clearSelection" title="Close">✕</button>
+      </div>
+
+      <!-- Link Dialog -->
+      <el-dialog v-model="linkDialogVisible" title="Create Link" width="380px" @close="resetLinkDialog">
+        <div class="link-dialog-body">
+          <p class="selected-text" v-if="selectedText">Selected: <strong>{{ selectedText }}</strong></p>
+          <el-input v-model="linkUrl" placeholder="https://example.com" />
+        </div>
+        <template #footer>
+          <el-button @click="linkDialogVisible=false">Cancel</el-button>
+          <el-button type="primary" :disabled="!validLink" @click="applyLink">Insert</el-button>
+        </template>
+      </el-dialog>
 
       <!-- Comment Icon -->
       <el-icon 
@@ -258,6 +283,14 @@ export default {
     const newCommentText = ref('')
     const isDragging = ref(false)
 
+    const selectionTooltipVisible = ref(false)
+    const selectionStart = ref(null)
+    const selectionEnd = ref(null)
+    const selectionTooltipStyle = ref({})
+    const linkDialogVisible = ref(false)
+    const linkUrl = ref('')
+    const selectedText = ref('')
+
     const hasChildren = computed(() => {
       return props.item.children && props.item.children.length > 0
     })
@@ -281,6 +314,8 @@ export default {
     const hasComments = computed(() => {
       return comments.value && comments.value.length > 0
     })
+
+    const validLink = computed(() => /^(https?:\/\/).+/i.test(linkUrl.value.trim()))
 
     const escapeHtml = (str = '') => str
       .replace(/&/g, '&amp;')
@@ -804,6 +839,157 @@ export default {
       emit('collapse-toggle', nodeId, isCollapsed)
     }
 
+    const updateTooltipPosition = () => {
+      // If editing a textarea selection we need manual measurement (textarea has no DOM ranges)
+      if (editing.value && textarea.value && selectionStart.value != null && selectionEnd.value != null) {
+        const rect = computeTextareaSelectionRect()
+        if (rect) {
+          selectionTooltipStyle.value = {
+            position: 'fixed',
+            top: (rect.top - 44) + 'px', // place above selection
+            left: (rect.left + rect.width / 2) + 'px',
+            transform: 'translate(-50%, 0)'
+          }
+          return
+        }
+      }
+      // Fallback (e.g. non-textarea selection)
+      try {
+        const sel = window.getSelection()
+        if (!sel || sel.rangeCount === 0) return
+        const range = sel.getRangeAt(0)
+        const domRect = range.getBoundingClientRect()
+        if (!domRect || (domRect.x === 0 && domRect.y === 0 && domRect.width === 0)) return
+        selectionTooltipStyle.value = {
+          position: 'fixed',
+          top: (domRect.top - 44) + 'px',
+          left: (domRect.left + domRect.width / 2) + 'px',
+          transform: 'translate(-50%, 0)'
+        }
+      } catch (_) {}
+    }
+
+    const computeTextareaSelectionRect = () => {
+      const ta = textarea.value
+      if (!ta) return null
+      const start = selectionStart.value
+      const end = selectionEnd.value
+      if (start == null || end == null) return null
+      const value = ta.value
+      // Mirror div
+      const div = document.createElement('div')
+      const cs = window.getComputedStyle(ta)
+      const props = ['fontSize','fontFamily','fontWeight','fontStyle','letterSpacing','textTransform','textAlign','lineHeight','paddingTop','paddingRight','paddingBottom','paddingLeft','borderTopWidth','borderRightWidth','borderBottomWidth','borderLeftWidth','boxSizing','wordBreak','whiteSpace']
+      props.forEach(p => { div.style[p] = cs[p] })
+      div.style.position = 'absolute'
+      div.style.visibility = 'hidden'
+      div.style.whiteSpace = 'pre-wrap'
+      div.style.wordWrap = 'break-word'
+      div.style.top = '0'
+      div.style.left = '-9999px'
+      div.style.width = ta.clientWidth + 'px'
+      const escape = (s) => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      const before = escape(value.substring(0, start)).replace(/\n/g,'<br/>')
+      let selText = value.substring(start, Math.max(start+1, end)) || ' '
+      // Only first line of selection for positioning
+      selText = selText.split('\n')[0] || ' '
+      const selHtml = escape(selText)
+      div.innerHTML = before + '<span id="__caret_marker__">' + selHtml + '</span>'
+      document.body.appendChild(div)
+      const span = div.querySelector('#__caret_marker__')
+      if (!span) { document.body.removeChild(div); return null }
+      const spanRect = span.getBoundingClientRect()
+      const taRect = ta.getBoundingClientRect()
+      const top = taRect.top + (spanRect.top - div.getBoundingClientRect().top) - ta.scrollTop
+      const left = taRect.left + (spanRect.left - div.getBoundingClientRect().left) - ta.scrollLeft
+      const rect = { top, left, width: spanRect.width, height: spanRect.height }
+      document.body.removeChild(div)
+      return rect
+    }
+
+    // Add missing clearSelection helper
+    const clearSelection = () => {
+      selectionTooltipVisible.value = false
+      selectionStart.value = null
+      selectionEnd.value = null
+      if (textarea.value) {
+        const pos = textarea.value.selectionEnd
+        textarea.value.setSelectionRange(pos, pos)
+      }
+    }
+
+    // --- Link dialog helpers (added) ---
+    const openLinkDialog = () => {
+      if (!editing.value) return
+      if (selectionStart.value == null || selectionEnd.value == null || selectionStart.value === selectionEnd.value) return
+      // Pre-fill URL if selection itself looks like a URL
+      const sel = selectedText.value.trim()
+      if (/^https?:\/\//i.test(sel)) {
+        linkUrl.value = sel
+      } else {
+        linkUrl.value = ''
+      }
+      linkDialogVisible.value = true
+    }
+
+    const applyLink = () => {
+      const url = linkUrl.value.trim()
+      if (!/^(https?:\/\/).+/i.test(url)) return
+      if (selectionStart.value == null || selectionEnd.value == null) return
+      const start = selectionStart.value
+      const end = selectionEnd.value
+      const original = editText.value
+      const label = selectedText.value || url
+      const markdown = `[${label}](${url})`
+      editText.value = original.slice(0, start) + markdown + original.slice(end)
+      // Move caret to end of inserted markdown
+      const newPos = start + markdown.length
+      if (textarea.value) {
+        textarea.value.focus()
+        textarea.value.setSelectionRange(newPos, newPos)
+      }
+      // Emit update since we changed text programmatically
+      emit('update', { id: props.item.id, text: editText.value, immediate: true })
+      linkDialogVisible.value = false
+      clearSelection()
+      resetLinkDialog()
+      requestAnimationFrame(autoResize)
+    }
+
+    const resetLinkDialog = () => {
+      linkUrl.value = ''
+    }
+
+    // Global click handler to hide tooltip when clicking outside
+    const globalClickHandler = (e) => {
+      if (!selectionTooltipVisible.value) return
+      if (linkDialogVisible.value) return // keep while dialog open
+      if (textarea.value && (e.target === textarea.value || textarea.value.contains(e.target))) return
+      if (e.target.closest && e.target.closest('.selection-tooltip')) return
+      selectionTooltipVisible.value = false
+    }
+
+    const handleSelection = () => {
+      if (!editing.value) return
+      if (!textarea.value) return
+      const el = textarea.value
+      const start = el.selectionStart
+      const end = el.selectionEnd
+      if (start === end) {
+        selectionTooltipVisible.value = false
+        return
+      }
+      selectionStart.value = start
+      selectionEnd.value = end
+      selectedText.value = editText.value.substring(start, end)
+      selectionTooltipVisible.value = true
+      requestAnimationFrame(updateTooltipPosition)
+    }
+
+    const onWindowScroll = () => {
+      if (selectionTooltipVisible.value) updateTooltipPosition()
+    }
+
     onMounted(() => {
       if (props.autoFocus) {
         startEdit()
@@ -812,6 +998,13 @@ export default {
       if (props.item.comments && Array.isArray(props.item.comments)) {
         try { comments.value = JSON.parse(JSON.stringify(props.item.comments)); } catch { comments.value = [...props.item.comments]; }
       }
+      window.addEventListener('click', globalClickHandler)
+      window.addEventListener('scroll', onWindowScroll, true)
+    })
+
+    onBeforeUnmount(() => {
+      window.removeEventListener('click', globalClickHandler)
+      window.removeEventListener('scroll', onWindowScroll, true)
     })
 
     // Sync if parent updates comments reference later
@@ -837,6 +1030,8 @@ export default {
       isDragOverChild,
       hasComments,
       renderedText,
+      selectionTooltipVisible,
+      selectionTooltipStyle,
       handleTextClick,
       startEdit,
       finishEdit,
@@ -878,7 +1073,17 @@ export default {
       imageSrc,
       copyInternalLink,
       processImageFile,
-      handleTextClick
+      handleSelection,
+      clearSelection,
+      openLinkDialog,
+      linkDialogVisible,
+      linkUrl,
+      selectedText,
+      validLink,
+      applyLink,
+      resetLinkDialog,
+      toggleCollapse,
+      updateTooltipPosition,
     }
   }
 }
@@ -1159,6 +1364,30 @@ export default {
 .outline-text.search-context {
   opacity: 0.7;
 }
+
+.selection-tooltip {
+  background: #fff;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  padding: 4px 6px;
+  display: flex;
+  gap: 4px;
+  z-index: 2000;
+  animation: fadeIn 120ms ease;
+}
+.tooltip-button {
+  background: transparent;
+  border: none;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  border-radius: 4px;
+}
+.tooltip-button:hover { background: #f2f3f5; }
+.link-dialog-body { display: flex; flex-direction: column; gap: 10px; }
+.selected-text { font-size: 12px; color: #606266; margin: 0; }
+@keyframes fadeIn { from { opacity: 0; transform: translate(-50%, -4px);} to { opacity:1; transform: translate(-50%, -8px);} }
 </style>
 
 <!-- Fix rows prop bindings in template -->
