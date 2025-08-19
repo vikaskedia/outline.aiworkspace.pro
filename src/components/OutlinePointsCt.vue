@@ -157,7 +157,7 @@
             <el-input
               v-model="comment.text"
               type="textarea"
-              rows="2"
+              :rows="2"
               class="comment-edit-textarea"
             />
             <div class="comment-actions">
@@ -178,7 +178,7 @@
         <el-input
           v-model="newCommentText"
           type="textarea"
-          rows="2"
+          :rows="2"
           placeholder="Add a comment..."
           class="comment-add-textarea"
         />
@@ -229,7 +229,7 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { Plus, ArrowRight, Delete, MoreFilled, ChatDotRound, Link, Right, Back } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { dragState } from './dragState.js'
@@ -358,11 +358,21 @@ export default {
       emit('add-sibling', { id: props.item.id })
     }
 
-    const handleIndent = () => {
+    // Adjust indent/outdent to allow pass-through from children
+    const handleIndent = (payload) => {
+      if (payload && payload.id && payload.id !== props.item.id) {
+        // Forward child indent event
+        emit('indent', payload)
+        return
+      }
       emit('indent', { id: props.item.id })
     }
 
-    const handleOutdent = () => {
+    const handleOutdent = (payload) => {
+      if (payload && payload.id && payload.id !== props.item.id) {
+        emit('outdent', payload)
+        return
+      }
       emit('outdent', { id: props.item.id })
     }
 
@@ -511,26 +521,25 @@ export default {
     }
 
     const loadComments = () => {
-      // In a real app, this would load from the database
-      comments.value = [
-        {
-          id: 1,
-          text: 'This is a sample comment',
-          editing: false
+      // Load existing comments from item if present
+      if (props.item.comments) {
+        try {
+          comments.value = JSON.parse(JSON.stringify(props.item.comments))
+        } catch {
+          comments.value = [...props.item.comments]
         }
-      ]
+      } else {
+        comments.value = []
+      }
     }
 
     const addComment = () => {
       if (!newCommentText.value.trim()) return
-      
-      const newComment = {
-        id: Date.now(),
-        text: newCommentText.value,
-        editing: false
-      }
+      const newComment = { id: Date.now(), text: newCommentText.value.trim(), editing: false }
       comments.value.push(newComment)
       newCommentText.value = ''
+      // Persist to parent outline
+      emit('update', { id: props.item.id, text: props.item.text, comments: comments.value, immediate: true })
       ElMessage.success('Comment added')
     }
 
@@ -542,6 +551,7 @@ export default {
     const saveComment = (comment) => {
       comment.editing = false
       delete comment.originalText
+      emit('update', { id: props.item.id, text: props.item.text, comments: comments.value, immediate: true })
       ElMessage.success('Comment updated')
     }
 
@@ -555,6 +565,7 @@ export default {
       const index = comments.value.findIndex(c => c.id === commentId)
       if (index > -1) {
         comments.value.splice(index, 1)
+        emit('update', { id: props.item.id, text: props.item.text, comments: comments.value, immediate: true })
         ElMessage.success('Comment deleted')
       }
     }
@@ -626,7 +637,18 @@ export default {
       if (props.autoFocus) {
         startEdit()
       }
+      // Initialize comments from item so icon shows immediately
+      if (props.item.comments && Array.isArray(props.item.comments)) {
+        try { comments.value = JSON.parse(JSON.stringify(props.item.comments)); } catch { comments.value = [...props.item.comments]; }
+      }
     })
+
+    // Sync if parent updates comments reference later
+    watch(() => props.item.comments, (newVal) => {
+      if (Array.isArray(newVal)) {
+        try { comments.value = JSON.parse(JSON.stringify(newVal)); } catch { comments.value = [...newVal]; }
+      }
+    }, { deep: true })
 
     return {
       editing,
@@ -960,3 +982,8 @@ export default {
   opacity: 0.7;
 }
 </style>
+
+<!-- Fix rows prop bindings in template -->
+<!--
+Replace: rows="2" with :rows="2" in el-input components (comment dialogs)
+-->

@@ -526,14 +526,15 @@ export default {
     }
 
     // Update outline text by id (recursive)
-    function updateTextById(items, id, text) {
+    function updateTextById(items, id, text, extra = {}) {
       for (const item of items) {
         if (item.id === id) {
           item.text = text;
+          if (extra.comments) item.comments = extra.comments;
           item.updated_at = new Date().toISOString();
           return true;
         }
-        if (item.children && updateTextById(item.children, id, text)) {
+        if (item.children && updateTextById(item.children, id, text, extra)) {
           return true;
         }
       }
@@ -582,14 +583,10 @@ export default {
       return null;
     }
 
-    function onOutlineUpdate({ id, text, updated_at, immediate }) {
-      updateTextById(outline.value, id, text);
+    function onOutlineUpdate({ id, text, comments, immediate }) {
+      updateTextById(outline.value, id, text, { comments });
       hasChanges.value = checkForChanges(outline.value);
-      if (immediate) {
-        debouncedSave();
-      } else {
-        debouncedSave();
-      }
+      debouncedSave();
     }
 
     function handleMove({ draggedId, targetId, position }) {
@@ -796,6 +793,16 @@ export default {
       return null;
     }
 
+    function setExclusiveAutoFocus(id) {
+      const walk = (items) => {
+        for (const item of items) {
+          item.autoFocus = item.id === id;
+          if (item.children) walk(item.children);
+        }
+      };
+      walk(outline.value);
+    }
+
     function handleIndent({ id }) {
       const ctx = findParentArrayAndIndex(id);
       if (!ctx) return;
@@ -807,6 +814,12 @@ export default {
       parentArray.splice(index, 1);
       if (!previousItem.children) previousItem.children = [];
       previousItem.children.push(item);
+      // Ensure the new parent is expanded if it was collapsed so user sees the result
+      if (collapsedNodes.value.has(previousItem.id.toString())) {
+        collapsedNodes.value.delete(previousItem.id.toString());
+        saveCollapsedState();
+      }
+      setExclusiveAutoFocus(id);
       hasChanges.value = true; debouncedSave();
     }
 
@@ -821,6 +834,8 @@ export default {
       const grandArray = grandCtx ? grandCtx.array : outline.value;
       const parentIndex = grandCtx ? grandCtx.index : outline.value.findIndex(i => i.id === parent.id);
       grandArray.splice(parentIndex + 1, 0, item);
+      // If parent was collapsed, still fine because item is now sibling and visible; no change needed
+      setExclusiveAutoFocus(id);
       hasChanges.value = true; debouncedSave();
     }
 
