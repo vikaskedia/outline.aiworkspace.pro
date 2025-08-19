@@ -590,7 +590,7 @@ export default {
     const handleCommand = (command) => {
       switch (command) {
         case 'delete':
-          handleDelete()
+          handleDelete(props.item.id)
           break
         case 'drilldown':
           emit('drilldown', props.item.id)
@@ -630,14 +630,18 @@ export default {
       }
     }
 
-    const handleDelete = () => {
-      ElMessageBox.confirm('Are you sure you want to delete this item?', 'Confirm Delete', {
-        type: 'warning'
-      }).then(() => {
-        emit('delete', props.item.id)
-      }).catch(() => {
-        // User cancelled
-      })
+    const deleteGuard = ref({ lastId: null, ts: 0 })
+
+    const handleDelete = (id) => {
+      //if (e) e.stopPropagation()
+      const now = Date.now()
+      // Ignore if same id emitted within 300ms
+      if (deleteGuard.value.lastId === id && (now - deleteGuard.value.ts) < 300) {
+        return
+      }
+      deleteGuard.value = { lastId: id, ts: now }
+      console.log('Delete item (guarded):', id)
+      emit('delete', id)
     }
 
     const toggleCollapse = () => {

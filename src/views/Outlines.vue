@@ -639,9 +639,22 @@ export default {
     }
 
     function handleDelete(id) {
-      const beforeJson = JSON.stringify(outline.value);
-      removeItemById(outline.value, id);
-      if (beforeJson !== JSON.stringify(outline.value)) { hasChanges.value = true; debouncedSave(); }
+      const node = findItemById(outline.value, id)
+      //console.log('handleDelete called for id:', id, 'node:', node, 'outline:', outline.value); return;
+      if (!node) return
+      const nodeText = (node.text || '').slice(0, 80) || 'this item'
+      ElMessageBox.confirm(
+        `Delete "${nodeText}" and all of its children?`,
+        'Confirm Delete',
+        { type: 'warning', confirmButtonText: 'Delete', cancelButtonText: 'Cancel' }
+      ).then(() => {
+        const beforeJson = JSON.stringify(outline.value)
+        removeItemById(outline.value, id)
+        if (beforeJson !== JSON.stringify(outline.value)) {
+          hasChanges.value = true
+          debouncedSave()
+        }
+      }).catch(() => {})
     }
 
     function handleDrilldown(id) {
