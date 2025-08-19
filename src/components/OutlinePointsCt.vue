@@ -45,17 +45,39 @@
         </div>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item command="delete">
-              <el-icon><Delete /></el-icon>
-              Delete
+            <el-dropdown-item command="add-child">
+              <el-icon><Plus /></el-icon>
+              Add Child
             </el-dropdown-item>
-            <el-dropdown-item command="drilldown" v-if="hasChildren">
+            <el-dropdown-item command="add-sibling">
+              <el-icon><Plus /></el-icon>
+              Add Sibling Below
+            </el-dropdown-item>
+            <el-dropdown-item command="indent">
+              ➡️ Indent
+            </el-dropdown-item>
+            <el-dropdown-item command="outdent">
+              ⬅️ Outdent
+            </el-dropdown-item>
+            <el-dropdown-item v-if="hasChildren" command="collapse">
+              <el-icon><ArrowRight /></el-icon>
+              {{ effectiveCollapsed ? 'Expand' : 'Collapse' }}
+            </el-dropdown-item>
+            <el-dropdown-item v-if="hasChildren" command="drilldown">
               <el-icon><Right /></el-icon>
               Focus on this
             </el-dropdown-item>
             <el-dropdown-item command="comment">
               <el-icon><ChatDotRound /></el-icon>
               Comment ({{ comments.length }})
+            </el-dropdown-item>
+            <el-dropdown-item command="copy-link">
+              <el-icon><Link /></el-icon>
+              Copy Internal Link
+            </el-dropdown-item>
+            <el-dropdown-item divided command="delete">
+              <el-icon><Delete /></el-icon>
+              Delete
             </el-dropdown-item>
           </el-dropdown-menu>
         </template>
@@ -116,7 +138,7 @@
     <div v-if="item.fileUrl" class="file-preview">
       <img 
         v-if="isImageFile(item.text)" 
-        :src="item.fileUrl" 
+        :src="imageSrc" 
         :alt="getFileName(item.text)"
         class="preview-image"
         @click="openImagePreview"
@@ -173,7 +195,7 @@
     >
       <img 
         v-if="item.fileUrl && isImageFile(item.text)" 
-        :src="item.fileUrl" 
+        :src="imageSrc" 
         class="preview-image-full"
         :alt="getFileName(item.text)"
       />
@@ -352,6 +374,14 @@ export default {
       }
     }
 
+    const imageSrc = computed(() => {
+      if (!props.item.fileUrl) return ''
+      const token = import.meta.env.VITE_GITEA_TOKEN
+      if (!token) return props.item.fileUrl
+      const hasQuery = props.item.fileUrl.includes('?')
+      return props.item.fileUrl + (hasQuery ? '&' : '?') + 'token=' + encodeURIComponent(token)
+    })
+
     const handleCommand = (command) => {
       switch (command) {
         case 'delete':
@@ -363,6 +393,35 @@ export default {
         case 'comment':
           openCommentDialog()
           break
+        case 'add-sibling':
+          emit('add-sibling', { id: props.item.id })
+          break
+        case 'add-child':
+          emit('add-sibling', { id: props.item.id, asChild: true })
+          break
+        case 'indent':
+          emit('indent', { id: props.item.id })
+          break
+        case 'outdent':
+          emit('outdent', { id: props.item.id })
+          break
+        case 'collapse':
+          toggleCollapse()
+          break
+        case 'copy-link':
+          copyInternalLink()
+          break
+      }
+    }
+
+    // placeholder copy link implementation
+    const copyInternalLink = () => {
+      try {
+        const url = window.location.origin + '#outline-' + props.item.id
+        navigator.clipboard.writeText(url)
+        ElMessage.success('Link copied')
+      } catch (e) {
+        ElMessage.error('Copy failed')
       }
     }
 
@@ -621,7 +680,9 @@ export default {
       handleDrilldown,
       handleNavigate,
       handleAddSibling,
-      handleCollapseToggle
+      handleCollapseToggle,
+      imageSrc,
+      copyInternalLink
     }
   }
 }
