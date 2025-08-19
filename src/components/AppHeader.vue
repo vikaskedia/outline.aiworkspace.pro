@@ -1,6 +1,6 @@
 <template>
   <header class="app-header">
-    <div class="header-content">
+    <div v-if="isAuthenticated" class="header-content">
       <!-- Left side - Logo and Workspace -->
       <div class="header-left">
         <div class="logo-section">
@@ -64,11 +64,11 @@
       <!-- Right side - User info and notifications -->
       <div class="header-right">
         <!-- Notifications -->
-        <div class="notification-icon">
+        <!--div class="notification-icon">
           <el-badge :value="notificationCount" :hidden="notificationCount === 0">
             <el-icon size="20"><Bell /></el-icon>
           </el-badge>
-        </div>
+        </div-->
 
         <!-- User Profile -->
         <el-dropdown @command="handleUserCommand" trigger="click" placement="bottom-end">
@@ -91,9 +91,15 @@
         </el-dropdown>
       </div>
     </div>
+    <div v-else class="unauth-message">
+      <div class="unauth-inner">
+        <strong>Authentication required.</strong> Please log in to access the workspace.
+      </div>
+    </div>
 
     <!-- Workspace Switcher Modal -->
     <el-dialog 
+      v-if="isAuthenticated"
       v-model="workspaceSwitcherVisible" 
       title="Switch Workspace" 
       width="500px"
@@ -155,6 +161,7 @@ export default {
     const userInfo = ref({ name: '', email: '', avatar: null, initials: '' })
     const workspaceTree = ref([])
     const flattenedWorkspaces = ref([])
+    const isAuthenticated = ref(false)
 
     const currentWorkspace = computed(() => workspaceStore.currentWorkspace)
 
@@ -200,86 +207,42 @@ export default {
 
     // Load user info from Supabase session
     const loadUserInfo = async () => {
-      // First, try to load from store
       workspaceStore.loadPersistedData()
-      
       try {
-        // Get current session from Supabase
-        const { data: { session }, error } = await supabase.auth.getSession()
-        
+        const { data: { session } } = await supabase.auth.getSession()
         if (session && session.user) {
-          // Extract user info from session
           const user = session.user
-          const userData = {
-            id: user.id,
-            name: user.user_metadata?.name || 
-                  user.user_metadata?.user_name || 
-                  user.user_metadata?.full_name ||
-                  user.email?.split('@')[0] || 'User',
-            email: user.email,
-            avatar: user.user_metadata?.avatar_url || null,
-            initials: (user.user_metadata?.name || user.email?.split('@')[0] || 'U')
-              .split(' ')
-              .map(n => n[0])
-              .join('')
-              .toUpperCase()
-              .substring(0, 2)
-          }
-          
+            const userData = {
+              id: user.id,
+              name: user.user_metadata?.name || user.user_metadata?.user_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
+              email: user.email,
+              avatar: user.user_metadata?.avatar_url || null,
+              initials: (user.user_metadata?.name || user.email?.split('@')[0] || 'U').split(' ').map(n => n[0]).join('').toUpperCase().substring(0,2)
+            }
           userInfo.value = userData
           workspaceStore.setUser(userData)
+          isAuthenticated.value = true
           return
         }
-      } catch (error) {
-        console.error('Error getting Supabase session:', error)
-      }
+      } catch (e) { console.error('Error getting Supabase session:', e) }
 
-      // Fallback: Try to get from existing store data
       if (workspaceStore.user) {
-        userInfo.value = {
-          ...userInfo.value,
-          ...workspaceStore.user
-        }
+        userInfo.value = { ...userInfo.value, ...workspaceStore.user }
+        isAuthenticated.value = true
         return
       }
 
-      // Fallback: Try cookies (legacy support)
-      const getCookie = (name) => {
-        const value = `; ${document.cookie}`
-        const parts = value.split(`; ${name}=`)
-        if (parts.length === 2) return parts.pop().split(';').shift()
-        return null
-      }
-
-      const userName = getCookie('user_name')
-      const userEmail = getCookie('user_email')
-
+      const getCookie = (name) => { const value = `; ${document.cookie}`; const parts = value.split(`; ${name}=`); if (parts.length === 2) return parts.pop().split(';').shift(); return null }
+      const userName = getCookie('user_name'); const userEmail = getCookie('user_email')
       if (userName || userEmail) {
-        const userData = {
-          name: userName || 'User',
-          email: userEmail || 'user@example.com',
-          avatar: null,
-          initials: (userName || 'U').split(' ').map(n => n[0]).join('').toUpperCase()
-        }
-        
-        userInfo.value = {
-          ...userInfo.value,
-          ...userData
-        }
-        
+        const userData = { name: userName || 'User', email: userEmail || 'user@example.com', avatar: null, initials: (userName || 'U').split(' ').map(n=>n[0]).join('').toUpperCase() }
+        userInfo.value = { ...userInfo.value, ...userData }
         workspaceStore.setUser(userData)
+        isAuthenticated.value = true
         return
       }
-
-      // Final fallback: set demo user
-      const demoUser = {
-        name: 'Raj Roushan Jha',
-        email: 'raj@example.com',
-        avatar: null,
-        initials: 'RJ'
-      }
-      userInfo.value = demoUser
-      workspaceStore.setUser(demoUser)
+      // No demo user; remain unauthenticated
+      isAuthenticated.value = false
     }
 
     // Helper: build tree from flat list
@@ -452,18 +415,20 @@ export default {
 
     onMounted(async () => {
       await loadUserInfo()
+      if (!isAuthenticated.value) return
       await loadWorkspaces()
       updateActiveSecondary()
     })
 
     // Watch for route changes to update current workspace
     watch(() => route.params.workspace_id, (newId) => {
-      if (!newId) return
+      if (!isAuthenticated.value || !newId) return
       const w = flattenedWorkspaces.value.find(x => x.id.toString() === newId)
       if (w) workspaceStore.setCurrentWorkspace(w)
     })
 
-    return {
+    return { 
+      isAuthenticated,
       currentWorkspace,
       workspaceSwitcherVisible,
       notificationCount,
@@ -768,4 +733,7 @@ export default {
 :deep(.el-dropdown .el-tooltip__trigger) {
   box-shadow: none !important;
 }
+
+.unauth-message { display:flex; align-items:center; justify-content:center; height:60px; font-size:0.9rem; color:#c0392b; background:#fff5f5; border-bottom:1px solid #f2d7d5; }
+.unauth-inner { max-width:1400px; width:100%; padding:0 2rem; }
 </style>

@@ -400,10 +400,10 @@ export default {
           emit('add-sibling', { id: props.item.id, asChild: true })
           break
         case 'indent':
-          emit('indent', { id: props.item.id })
+          emit('indent', { id: props.item.id });
           break
         case 'outdent':
-          emit('outdent', { id: props.item.id })
+          emit('outdent', { id: props.item.id });
           break
         case 'collapse':
           toggleCollapse()

@@ -501,13 +501,18 @@ export default {
         const { data: { user: authUser } } = await supabase.auth.getUser();
         if (authUser) {
           if (outlineId.value) {
+            const nextVersion = (currentVersion.value || 1) + 1;
             const { error: updateErr, data: updated } = await supabase
               .from('outlines')
-              .update({ content: outline.value, updated_at: new Date().toISOString() })
+              .update({ content: outline.value, updated_at: new Date().toISOString(), version: nextVersion })
               .eq('id', outlineId.value)
               .select('version')
               .single();
-            if (updateErr) console.error('Outline update error', updateErr.message); else currentVersion.value = updated?.version || currentVersion.value + 1;
+            if (updateErr) {
+              console.error('Outline update error', updateErr.message);
+            } else {
+              currentVersion.value = updated?.version || nextVersion;
+            }
           }
         }
         const newVersion = currentVersion.value; // version from DB or previous
@@ -579,46 +584,40 @@ export default {
 
     function onOutlineUpdate({ id, text, updated_at, immediate }) {
       updateTextById(outline.value, id, text);
-      
+      hasChanges.value = checkForChanges(outline.value);
       if (immediate) {
-        // For real-time updates, we might want to save immediately
-        // For now, just update the content
+        debouncedSave();
+      } else {
+        debouncedSave();
       }
     }
 
     function handleMove({ draggedId, targetId, position }) {
       //console.log('Moving item:', { draggedId, targetId, position });
-      
+      const beforeJson = JSON.stringify(outline.value);
       const draggedItem = findItemById(outline.value, draggedId);
       if (!draggedItem) return;
-      
-      // Remove from current position
       removeItemById(outline.value, draggedId);
-      
-      // Find target and add in new position
       const targetItem = findItemById(outline.value, targetId);
       if (!targetItem) return;
-      
       if (position === 'child') {
-        if (!targetItem.children) {
-          targetItem.children = [];
-        }
+        if (!targetItem.children) { targetItem.children = []; }
         targetItem.children.push(draggedItem);
       } else {
         const targetParent = findParentById(outline.value, targetId);
         const targetArray = targetParent ? targetParent.children : outline.value;
         const targetIndex = targetArray.findIndex(item => item.id === targetId);
-        
-        if (position === 'top') {
-          targetArray.splice(targetIndex, 0, draggedItem);
-        } else {
-          targetArray.splice(targetIndex + 1, 0, draggedItem);
-        }
+        if (position === 'top') { targetArray.splice(targetIndex, 0, draggedItem); } else { targetArray.splice(targetIndex + 1, 0, draggedItem); }
+      }
+      if (beforeJson !== JSON.stringify(outline.value)) {
+        hasChanges.value = true; debouncedSave();
       }
     }
 
     function handleDelete(id) {
+      const beforeJson = JSON.stringify(outline.value);
       removeItemById(outline.value, id);
+      if (beforeJson !== JSON.stringify(outline.value)) { hasChanges.value = true; debouncedSave(); }
     }
 
     function handleDrilldown(id) {
@@ -782,58 +781,66 @@ export default {
     }
 
     // --- Indent/Outdent logic ---
-    function handleIndent({ id }) {
-      const parent = findParentById(outline.value, id);
-      const parentArray = parent ? parent.children : outline.value;
-      const itemIndex = parentArray.findIndex(item => item.id === id);
-      
-      if (itemIndex > 0) {
-        const item = parentArray[itemIndex];
-        const previousItem = parentArray[itemIndex - 1];
-        
-        // Remove from current position
-        parentArray.splice(itemIndex, 1);
-        
-        // Add as child of previous item
-        if (!previousItem.children) {
-          previousItem.children = [];
+    // Helper to get parent array and index for a node id
+    function findParentArrayAndIndex(id, items = outline.value, parent = null) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.id === id) {
+          return { parent, array: items, index: i };
         }
-        previousItem.children.push(item);
+        if (item.children && item.children.length) {
+          const found = findParentArrayAndIndex(id, item.children, item);
+          if (found) return found;
+        }
       }
+      return null;
+    }
+
+    function handleIndent({ id }) {
+      const ctx = findParentArrayAndIndex(id);
+      if (!ctx) return;
+      const { array: parentArray, index } = ctx;
+      if (index === 0) return; // cannot indent first item in a group
+      const item = parentArray[index];
+      const previousItem = parentArray[index - 1];
+      // Remove from current siblings
+      parentArray.splice(index, 1);
+      if (!previousItem.children) previousItem.children = [];
+      previousItem.children.push(item);
+      hasChanges.value = true; debouncedSave();
     }
 
     function handleOutdent({ id }) {
-      const parent = findParentById(outline.value, id);
-      if (!parent) return; // Already at root level
-      
-      const grandParent = findParentById(outline.value, parent.id);
-      const grandParentArray = grandParent ? grandParent.children : outline.value;
-      const parentIndex = grandParentArray.findIndex(item => item.id === parent.id);
-      
-      const item = findItemById(outline.value, id);
-      const itemIndex = parent.children.findIndex(child => child.id === id);
-      
-      // Remove from parent's children
-      parent.children.splice(itemIndex, 1);
-      
-      // Add to grandparent's children after parent
-      grandParentArray.splice(parentIndex + 1, 0, item);
+      const ctx = findParentArrayAndIndex(id);
+      if (!ctx) return;
+      const { parent, array: parentArray, index } = ctx;
+      if (!parent) return; // already root
+      const item = parentArray.splice(index, 1)[0];
+      // Find grandparent context
+      const grandCtx = findParentArrayAndIndex(parent.id);
+      const grandArray = grandCtx ? grandCtx.array : outline.value;
+      const parentIndex = grandCtx ? grandCtx.index : outline.value.findIndex(i => i.id === parent.id);
+      grandArray.splice(parentIndex + 1, 0, item);
+      hasChanges.value = true; debouncedSave();
     }
 
-    function handleAddSiblingRoot({ id }) {
+    function handleAddSiblingRoot({ id, asChild }) {
+      if (asChild) {
+        const target = findItemById(outline.value, id);
+        if (!target) return;
+        if (!target.children) target.children = [];
+        const newId = Date.now();
+        target.children.push({ id: newId, text: '', children: [], autoFocus: true });
+        hasChanges.value = true; debouncedSave();
+        return;
+      }
       const parent = findParentById(outline.value, id);
       const parentArray = parent ? parent.children : outline.value;
       const itemIndex = parentArray.findIndex(item => item.id === id);
-      
       const newId = Date.now();
-      const newItem = {
-        id: newId,
-        text: '',
-        children: [],
-        autoFocus: true
-      };
-      
+      const newItem = { id: newId, text: '', children: [], autoFocus: true };
       parentArray.splice(itemIndex + 1, 0, newItem);
+      hasChanges.value = true; debouncedSave();
     }
 
     // Manual refresh function for user-triggered sync
