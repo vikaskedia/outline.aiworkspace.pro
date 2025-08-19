@@ -1,5 +1,12 @@
 <template>
-  <div class="outline-container">
+  <!-- Not authenticated message -->
+  <div v-if="!isAuthenticated" class="not-auth-message">
+    <h2>Sign in required</h2>
+    <p>Please log in to view and edit this workspace outline.</p>
+  </div>
+
+  <!-- Outline content only when authenticated -->
+  <div v-else class="outline-container">
     <!-- Breadcrumbs -->
     <div v-if="breadcrumbPath.length" class="outline-breadcrumbs">
       <template v-for="(node, idx) in breadcrumbPath" :key="node.id">
@@ -175,8 +182,8 @@
       />
     </ul>
 
-    <!-- Empty state -->
-    <div v-if="!outline.length" class="empty-state">
+    <!-- Empty state (only when authenticated) -->
+    <div v-if="isAuthenticated && !outline.length" class="empty-state">
       <p>Start building your outline...</p>
       <el-button @click="addFirstItem" type="primary">Add First Item</el-button>
     </div>
@@ -251,6 +258,8 @@ export default {
     const searchQuery = ref('');
     const searchStats = ref({ matches: 0, items: 0 });
     const lastSaveTime = ref(null);
+    const isAuthenticated = ref(false);
+    const authCheckDone = ref(false);
     
     // Generate unique render ID for this tab/component instance
     const outlineRenderID = ref(generateRenderID());
@@ -421,44 +430,48 @@ export default {
       if (!workspaceId.value) return;
       loadCollapsedState();
       const focusParam = route.query.focus; if (focusParam) focusedId.value = parseInt(focusParam);
-
-      // Reset change tracking
       hasChanges.value = false;
-
       try {
         const { data: { user: authUser } } = await supabase.auth.getUser();
-        if (authUser) {
-          const { data: existingOutline, error: outlineError } = await supabase
+        authCheckDone.value = true;
+        if (!authUser) {
+          isAuthenticated.value = false;
+          outline.value = [];
+          lastSavedContent.value = null;
+          return; // Do not load defaults for unauthenticated users
+        }
+        isAuthenticated.value = true;
+
+        const { data: existingOutline, error: outlineError } = await supabase
+          .from('outlines')
+          .select('id, content, version, title')
+          .eq('workspace_id', workspaceId.value)
+          .order('id', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (outlineError) console.warn('Outline fetch error', outlineError.message);
+        if (existingOutline && existingOutline.content) {
+          outlineId.value = existingOutline.id;
+          outline.value = Array.isArray(existingOutline.content) ? existingOutline.content : [];
+          ensureAutoFocusProp(outline.value);
+          lastSavedContent.value = deepClone(outline.value);
+          currentVersion.value = existingOutline.version || 1;
+        } else {
+          const initial = deepClone(defaultOutline);
+          const { data: created, error: createErr } = await supabase
             .from('outlines')
-            .select('id, content, version, title')
-            .eq('workspace_id', workspaceId.value)
-            .order('id', { ascending: true })
-            .limit(1)
-            .maybeSingle();
-          if (outlineError) console.warn('Outline fetch error', outlineError.message);
-          if (existingOutline && existingOutline.content) {
-            outlineId.value = existingOutline.id;
-            outline.value = Array.isArray(existingOutline.content) ? existingOutline.content : [];
+            .insert([{ workspace_id: workspaceId.value, title: 'Outline', content: initial }])
+            .select('id, version')
+            .single();
+          if (!createErr && created) {
+            outlineId.value = created.id;
+            outline.value = initial;
             ensureAutoFocusProp(outline.value);
             lastSavedContent.value = deepClone(outline.value);
-            currentVersion.value = existingOutline.version || 1;
-          } else {
-            const initial = deepClone(defaultOutline);
-            const { data: created, error: createErr } = await supabase
-              .from('outlines')
-              .insert([{ workspace_id: workspaceId.value, title: 'Outline', content: initial }])
-              .select('id, version')
-              .single();
-            if (!createErr && created) {
-              outlineId.value = created.id;
-              outline.value = initial;
-              ensureAutoFocusProp(outline.value);
-              lastSavedContent.value = deepClone(outline.value);
-              currentVersion.value = created.version || 1;
-            } else if (createErr) {
-              console.error('Create outline error', createErr.message);
-              outline.value = deepClone(defaultOutline); ensureAutoFocusProp(outline.value);
-            }
+            currentVersion.value = created.version || 1;
+          } else if (createErr) {
+            console.error('Create outline error', createErr.message);
+            outline.value = deepClone(defaultOutline); ensureAutoFocusProp(outline.value);
           }
         }
       } catch (err) {
@@ -498,6 +511,7 @@ export default {
     });
 
     async function saveOutline() {
+      if (!isAuthenticated.value) return; // skip save if not logged in
       if (saving.value) return;
       try {
         saving.value = true;
@@ -1036,13 +1050,35 @@ To prevent data loss and conflicts, you need to reload the latest changes before
       searchStats,
       clearSearch,
       updateSearchStats,
-      addFirstItem
+      addFirstItem,
+      isAuthenticated,
+      authCheckDone
     };
   }
 };
 </script>
 
 <style scoped>
+.not-auth-message {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 3rem 2rem;
+  max-width: 700px;
+  margin: 3rem auto;
+  text-align: center;
+}
+.not-auth-message h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.6rem;
+  color: #23272f;
+}
+.not-auth-message p {
+  margin: 0;
+  color: #555;
+  font-size: 1rem;
+}
+
 .outline-container {
   background: white;
   border-radius: 8px;
