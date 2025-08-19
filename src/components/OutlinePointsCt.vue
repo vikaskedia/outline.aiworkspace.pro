@@ -87,9 +87,9 @@
       <div 
         v-if="!editing"
         class="outline-text"
-        @click="startEdit"
+        @click="handleTextClick"
         @dblclick="startEdit"
-        v-html="highlightedText"
+        v-html="renderedText"
       ></div>
 
       <textarea
@@ -282,25 +282,50 @@ export default {
       return comments.value && comments.value.length > 0
     })
 
-    const highlightedText = computed(() => {
-      if (!props.searchQuery || !props.item.text) {
-        return props.item.text || 'Click to edit...'
-      }
-      
-      const text = props.item.text
-      const query = props.searchQuery.toLowerCase()
-      const index = text.toLowerCase().indexOf(query)
-      
-      if (index === -1) {
-        return text
-      }
-      
-      const before = text.substring(0, index)
-      const match = text.substring(index, index + query.length)
-      const after = text.substring(index + query.length)
-      
-      return `${before}<span class="search-highlight">${match}</span>${after}`
+    const escapeHtml = (str = '') => str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+
+    const linkify = (text = '') => {
+      if (!text) return ''
+      // Escape first
+      let html = escapeHtml(text)
+      // Markdown links [title](http://url)
+      html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (m, label, url) => {
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`
+      })
+      // Plain URLs (avoid ones already inside an anchor)
+      html = html.replace(/(^|\s)(https?:\/\/[^\s<]+)(?![^<]*?>)/g, (m, prefix, url) => {
+        return `${prefix}<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`
+      })
+      return html
+    }
+
+    const applySearchHighlight = (html) => {
+      if (!props.searchQuery) return html
+      const q = props.searchQuery.trim()
+      if (!q) return html
+      // Simple highlight outside of tags
+      // Split by tags
+      return html.split(/(<[^>]+?>)/g).map(segment => {
+        if (segment.startsWith('<')) return segment
+        const regex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig')
+        return segment.replace(regex, match => `<span class="search-highlight">${match}</span>`)
+      }).join('')
+    }
+
+    const renderedText = computed(() => {
+      const base = linkify(props.item.text || 'Click to edit...')
+      return applySearchHighlight(base)
     })
+
+    const handleTextClick = (e) => {
+      if (e.target.closest('a')) return
+      startEdit()
+    }
 
     const startEdit = async () => {
       if (props.readonly) return
@@ -811,7 +836,8 @@ export default {
       isDragOverBottom,
       isDragOverChild,
       hasComments,
-      highlightedText,
+      renderedText,
+      handleTextClick,
       startEdit,
       finishEdit,
       handleTextChange,
@@ -851,7 +877,8 @@ export default {
       handleCollapseToggle,
       imageSrc,
       copyInternalLink,
-      processImageFile
+      processImageFile,
+      handleTextClick
     }
   }
 }
