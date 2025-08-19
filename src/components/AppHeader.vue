@@ -51,9 +51,9 @@
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item v-for="item in secondaryNavItems" :key="item.label" :class="{ active: item.active }">
-                  <a :href="item.href" class="nav-link" @click.stop>
+                  <span class="nav-link" @click="handleSecondaryNavClick(item)">
                     {{ item.label }}
-                  </a>
+                  </span>
                 </el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -165,30 +165,29 @@ export default {
 
     const currentWorkspace = computed(() => workspaceStore.currentWorkspace)
 
-    // Static secondary nav items (hrefs can be adjusted later)
+    // Static secondary nav items 
     const secondaryNavItems = ref([
-      { label: 'Dashboard', href: '/dashboard' },
-      { label: 'Goals', href: '/goals' },
-      { label: 'Tasks', href: '/tasks' },
-      { label: 'Events', href: '/events' },
-      { label: 'Files', href: '/files' },
-      { label: 'Outlines', href: computed(() => currentWorkspace.value ? `/single-workspace/${currentWorkspace.value.id}/outlines` : '/outlines') },
-      { label: 'Communications', href: '/communications' },
-      { label: 'Canvas', href: '/canvas' },
-      { label: 'AI Phone', href: '/ai-phone' },
-      { label: 'AI Intake', href: '/ai-intake' },
-      { label: 'AI Fax', href: '/ai-fax' },
-      { label: 'AI Portfolios', href: '/ai-portfolios' },
-      { label: 'AI Fund Analyst', href: '/ai-fund-analyst' },
-      { label: 'Contacts', href: '/contacts' },
-      { label: 'Settings', href: '/settings' }
+      { label: 'Dashboard', key: 'dashboard' },
+      { label: 'Goals', key: 'goals' },
+      { label: 'Tasks', key: 'tasks' },
+      { label: 'Events', key: 'events' },
+      { label: 'Files', key: 'files' },
+      { label: 'Outlines', key: 'outlines' },
+      { label: 'Communications', key: 'communications' },
+      { label: 'Canvas', key: 'canvas' },
+      { label: 'AI Phone', key: 'ai-phone' },
+      { label: 'AI Intake', key: 'ai-intake' },
+      { label: 'AI Fax', key: 'ai-fax' },
+      { label: 'AI Portfolios', key: 'ai-portfolios' },
+      { label: 'AI Fund Analyst', key: 'ai-fund-analyst' },
+      { label: 'Contacts', key: 'contacts' },
+      { label: 'Settings', key: 'settings' }
     ])
 
     const currentSectionLabel = computed(() => {
       const path = route.path.toLowerCase()
       const match = secondaryNavItems.value.find(item => {
-        const href = typeof item.href === 'string' ? item.href : item.href.value
-        return href !== '/' && path.startsWith(href.toLowerCase())
+        return path.includes(item.key)
       })
       return match ? match.label : 'Outlines'
     })
@@ -197,8 +196,7 @@ export default {
     const updateActiveSecondary = () => {
       const path = route.path.toLowerCase()
       secondaryNavItems.value.forEach(item => {
-        const href = typeof item.href === 'string' ? item.href : item.href.value
-        item.active = path.startsWith(href.toLowerCase())
+        item.active = path.includes(item.key)
       })
     }
 
@@ -331,6 +329,38 @@ export default {
       }
     }
 
+    // Handle secondary navigation clicks
+    const handleSecondaryNavClick = (item) => {
+      const workspace = currentWorkspace.value
+      
+      switch (item.key) {
+        case 'outlines':
+          // Stay in current app for outlines
+          if (workspace) {
+            router.push(`/single-workspace/${workspace.id}/outlines`)
+          } else {
+            router.push('/outlines')
+          }
+          break
+        
+        case 'canvas':
+          // Redirect to canvas.aiworkspace.pro
+          if (workspace) {
+            const canvasUrl = `https://canvas.aiworkspace.pro/single-workspace/${workspace.id}/canvas`
+            window.location.href = canvasUrl
+          } else {
+            window.location.href = 'https://canvas.aiworkspace.pro'
+          }
+          break
+        
+        default:
+          // Redirect to main app.aiworkspace.pro for all other items
+          const mainAppUrl = `https://app.aiworkspace.pro/single-workspace/${workspace ? workspace.id : ''}/${item.key}`
+          window.location.href = mainAppUrl
+          break
+      }
+    }
+
     // Handle user menu commands
     const handleUserCommand = (command) => {
       switch (command) {
@@ -439,6 +469,7 @@ export default {
       flattenedWorkspaces,
       handleNavCommand,
       handleUserCommand,
+      handleSecondaryNavClick,
       switchWorkspace,
       createNewWorkspace,
       secondaryNavItems,
@@ -716,8 +747,20 @@ export default {
   }
 }
 
-.nav-link { display:block; width:100%; text-decoration:none; color:inherit; }
-.nav-link:hover { color:#2c3e50; }
+.nav-link { 
+  display: block; 
+  width: 100%; 
+  text-decoration: none; 
+  color: inherit; 
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+.nav-link:hover { 
+  color: #2c3e50; 
+  background-color: #f8f9fa;
+}
 .el-dropdown-menu .active > .nav-link { font-weight:600; }
 /* Remove blue focus outline/border on dropdown triggers */
 .nav-item:focus,
