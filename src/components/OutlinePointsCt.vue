@@ -770,16 +770,16 @@ export default {
 }
 
 .outline-bullet {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: #4B5155;
   display: inline-block;
   margin-right: 9px;
   vertical-align: top;
   border: 2px solid #e3eaf6;
-  margin-left: -18px;
-  margin-top: 5px;
+  margin-left: -22px;
+  margin-top: 0;
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -842,12 +842,12 @@ export default {
 }
 
 .three-dot-menu {
-  margin-right: 5px;
+  margin-right: 30px;
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.2s ease;
-  margin-top: 5px;
-  margin-left: -24px;
+  margin-top: 0;
+  margin-left: -55px;
 }
 
 .outline-row:hover .three-dot-menu {
