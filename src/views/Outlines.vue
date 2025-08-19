@@ -1,8 +1,12 @@
 <template>
-  <!-- Not authenticated message -->
-  <div v-if="!isAuthenticated" class="not-auth-message">
+  <!-- Not authenticated message (shown immediately before auth check completes) -->
+  <div v-if="!isAuthenticated && authCheckDone" class="not-auth-message">
     <h2>Sign in required</h2>
     <p>Please log in to view and edit this workspace outline.</p>
+  </div>
+  <div v-else-if="!authCheckDone" class="not-auth-message">
+    <h2>Loading...</h2>
+    <p>Checking your session.</p>
   </div>
 
   <!-- Outline content only when authenticated -->
@@ -427,18 +431,19 @@ export default {
 
     // Load from Supabase or localStorage
     async function loadOutline() {
-      if (!workspaceId.value) return;
+      authCheckDone.value = false; // reset before each load
+      if (!workspaceId.value) { authCheckDone.value = true; return; }
       loadCollapsedState();
       const focusParam = route.query.focus; if (focusParam) focusedId.value = parseInt(focusParam);
       hasChanges.value = false;
       try {
         const { data: { user: authUser } } = await supabase.auth.getUser();
-        authCheckDone.value = true;
         if (!authUser) {
           isAuthenticated.value = false;
           outline.value = [];
           lastSavedContent.value = null;
-          return; // Do not load defaults for unauthenticated users
+          authCheckDone.value = true;
+          return;
         }
         isAuthenticated.value = true;
 
@@ -475,7 +480,7 @@ export default {
           }
         }
       } catch (err) {
-        console.error('Supabase outline load failed, falling back to localStorage', err);
+        console.error('Supabase outline load failed', err);
       }
 
       // Fallback to localStorage if still empty
@@ -490,6 +495,7 @@ export default {
       }
 
       updatePageTitle();
+      authCheckDone.value = true;
     }
 
     onMounted(async () => {
