@@ -205,31 +205,28 @@ export default {
 
     // Load user info from Supabase session
     const loadUserInfo = async () => {
-      workspaceStore.loadPersistedData()
+      // First check Supabase session (highest priority)
       try {
         const { data: { session } } = await supabase.auth.getSession()
         if (session && session.user) {
           const user = session.user
-            const userData = {
-              id: user.id,
-              name: user.user_metadata?.name || user.user_metadata?.user_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
-              email: user.email,
-              avatar: user.user_metadata?.avatar_url || null,
-              initials: (user.user_metadata?.name || user.email?.split('@')[0] || 'U').split(' ').map(n => n[0]).join('').toUpperCase().substring(0,2)
-            }
+          const userData = {
+            id: user.id,
+            name: user.user_metadata?.name || user.user_metadata?.user_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
+            email: user.email,
+            avatar: user.user_metadata?.avatar_url || null,
+            initials: (user.user_metadata?.name || user.email?.split('@')[0] || 'U').split(' ').map(n => n[0]).join('').toUpperCase().substring(0,2)
+          }
           userInfo.value = userData
           workspaceStore.setUser(userData)
           isAuthenticated.value = true
+          // Load other persisted data only after successful authentication
+          workspaceStore.loadPersistedData()
           return
         }
       } catch (e) { console.error('Error getting Supabase session:', e) }
 
-      if (workspaceStore.user) {
-        userInfo.value = { ...userInfo.value, ...workspaceStore.user }
-        isAuthenticated.value = true
-        return
-      }
-
+      // Second check login cookies
       const getCookie = (name) => { const value = `; ${document.cookie}`; const parts = value.split(`; ${name}=`); if (parts.length === 2) return parts.pop().split(';').shift(); return null }
       const userName = getCookie('user_name'); const userEmail = getCookie('user_email')
       if (userName || userEmail) {
@@ -237,8 +234,25 @@ export default {
         userInfo.value = { ...userInfo.value, ...userData }
         workspaceStore.setUser(userData)
         isAuthenticated.value = true
+        // Load other persisted data only after successful authentication
+        workspaceStore.loadPersistedData()
         return
       }
+
+      // Last check localStorage (only load workspace data, not user data)
+      const storedWorkspace = localStorage.getItem('current_workspace')
+      const storedWorkspaces = localStorage.getItem('available_workspaces')
+      if (storedWorkspace) {
+        try { workspaceStore.currentWorkspace = JSON.parse(storedWorkspace) } catch (error) { console.error('Error loading persisted workspace:', error) }
+      }
+      if (storedWorkspaces) {
+        try { workspaceStore.workspaces = JSON.parse(storedWorkspaces) } catch (error) { console.error('Error loading persisted workspaces:', error) }
+      }
+
+      // No valid authentication found, clear any persisted user info from localStorage
+      workspaceStore.clearData()
+      // Explicitly remove user_info from localStorage to ensure it's cleared
+      localStorage.removeItem('user_info')
       // No demo user; remain unauthenticated
       isAuthenticated.value = false
     }
