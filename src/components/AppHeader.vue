@@ -772,7 +772,7 @@ export default {
   text-decoration: none; 
   color: inherit; 
   cursor: pointer;
-  padding: 8px 12px;
+  padding: 0 8px;
   border-radius: 4px;
   transition: all 0.2s ease;
 }

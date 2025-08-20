@@ -69,7 +69,7 @@ button:focus {
 }
 
 .el-dropdown-menu__item {
-  padding: 0 16px;
+  padding: 8px 16px;
   font-size: 0.9rem;
   line-height: 16px;
 }
