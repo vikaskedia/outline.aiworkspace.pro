@@ -174,6 +174,8 @@
         :check-version-before-edit="checkVersionBeforeEdit"
         :handle-version-conflict="handleVersionConflict"
         :search-query="searchQuery"
+        :outline-metadata="outlineMetadata"
+        :user-info="userInfo"
         @update="onOutlineUpdate"
         @move="handleMove"
         @delete="handleDelete"
@@ -282,6 +284,36 @@ export default {
     
     // Computed property for workspace name
     const workspaceName = computed(() => currentWorkspace.value?.title || 'Workspace');
+
+    // Computed property for user info
+    const userInfo = computed(() => workspaceStore.user || {});
+
+    // Computed property for outline metadata (for showing creation/modification info)
+    const outlineMetadata = computed(() => ({
+      created_by: currentOutlineData.value?.created_by,
+      created_at: currentOutlineData.value?.created_at,
+      updated_at: currentOutlineData.value?.updated_at,
+      version: currentVersion.value,
+      users: currentOutlineData.value?.users || {},
+      created_by_name: currentOutlineData.value?.created_by_name
+    }));
+
+    // Store current outline data for metadata
+    const currentOutlineData = ref({});
+
+    // Function to fetch user info for creator
+    const fetchUserInfo = async (userId) => {
+      if (!userId) return null
+      try {
+        // This would ideally be a user lookup service
+        // For now, we'll try to use Supabase auth to get user info
+        // but this might not work for other users
+        return null
+      } catch (error) {
+        console.warn('Could not fetch user info:', error)
+        return null
+      }
+    }
 
     // Function to update page title
     const updatePageTitle = () => {
@@ -449,7 +481,7 @@ export default {
 
         const { data: existingOutline, error: outlineError } = await supabase
           .from('outlines')
-          .select('id, content, version, title')
+          .select('id, content, version, title, created_by, created_at, updated_at')
           .eq('workspace_id', workspaceId.value)
           .order('id', { ascending: true })
           .limit(1)
@@ -461,6 +493,14 @@ export default {
           ensureAutoFocusProp(outline.value);
           lastSavedContent.value = deepClone(outline.value);
           currentVersion.value = existingOutline.version || 1;
+          // Store metadata
+          currentOutlineData.value = {
+            created_by: existingOutline.created_by,
+            created_at: existingOutline.created_at,
+            updated_at: existingOutline.updated_at,
+            users: {}, // We could populate this with user lookups if needed
+            created_by_name: userInfo.value?.id === existingOutline.created_by ? userInfo.value.name || userInfo.value.email : null
+          };
         } else {
           const initial = deepClone(defaultOutline);
           const { data: created, error: createErr } = await supabase
@@ -474,6 +514,14 @@ export default {
             ensureAutoFocusProp(outline.value);
             lastSavedContent.value = deepClone(outline.value);
             currentVersion.value = created.version || 1;
+            // Store metadata for new outline
+            currentOutlineData.value = {
+              created_by: authUser.id,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              users: {},
+              created_by_name: userInfo.value.name || userInfo.value.email
+            };
           } else if (createErr) {
             console.error('Create outline error', createErr.message);
             outline.value = deepClone(defaultOutline); ensureAutoFocusProp(outline.value);
@@ -558,6 +606,8 @@ export default {
           if (text !== undefined) item.text = text;
           if (extra.comments) item.comments = extra.comments;
           if (Object.prototype.hasOwnProperty.call(extra, 'fileUrl')) item.fileUrl = extra.fileUrl; // persist image data URL
+          if (extra.updated_by) item.updated_by = extra.updated_by;
+          if (extra.updated_by_name) item.updated_by_name = extra.updated_by_name;
           item.updated_at = new Date().toISOString();
           return true;
         }
@@ -610,8 +660,8 @@ export default {
       return null;
     }
 
-    function onOutlineUpdate({ id, text, comments, fileUrl, immediate }) {
-      updateTextById(outline.value, id, text, { comments, fileUrl });
+    function onOutlineUpdate({ id, text, comments, fileUrl, immediate, updated_by, updated_by_name }) {
+      updateTextById(outline.value, id, text, { comments, fileUrl, updated_by, updated_by_name });
       hasChanges.value = checkForChanges(outline.value);
       debouncedSave();
     }
@@ -880,12 +930,25 @@ export default {
     }
 
     function handleAddSiblingRoot({ id, asChild }) {
+      const currentTime = new Date().toISOString();
+      const creatorId = userInfo.value?.id;
+      const creatorName = userInfo.value?.name || userInfo.value?.email;
+      
       if (asChild) {
         const target = findItemById(outline.value, id);
         if (!target) return;
         if (!target.children) target.children = [];
         const newId = Date.now();
-        target.children.push({ id: newId, text: '', children: [], autoFocus: true });
+        const newItem = { 
+          id: newId, 
+          text: '', 
+          children: [], 
+          autoFocus: true,
+          created_at: currentTime,
+          created_by: creatorId,
+          created_by_name: creatorName
+        };
+        target.children.push(newItem);
         hasChanges.value = true; debouncedSave();
         return;
       }
@@ -893,7 +956,15 @@ export default {
       const parentArray = parent ? parent.children : outline.value;
       const itemIndex = parentArray.findIndex(item => item.id === id);
       const newId = Date.now();
-      const newItem = { id: newId, text: '', children: [], autoFocus: true };
+      const newItem = { 
+        id: newId, 
+        text: '', 
+        children: [], 
+        autoFocus: true,
+        created_at: currentTime,
+        created_by: creatorId,
+        created_by_name: creatorName
+      };
       parentArray.splice(itemIndex + 1, 0, newItem);
       hasChanges.value = true; debouncedSave();
     }
@@ -1071,7 +1142,9 @@ To prevent data loss and conflicts, you need to reload the latest changes before
       updateSearchStats,
       addFirstItem,
       isAuthenticated,
-      authCheckDone
+      authCheckDone,
+      userInfo,
+      outlineMetadata
     };
   }
 };

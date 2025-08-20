@@ -69,12 +69,12 @@ button:focus {
 }
 
 .el-dropdown-menu__item {
-  padding: 8px 16px;
+  padding: 0 16px;
   font-size: 0.9rem;
+  line-height: 16px;
 }
 
 .el-dropdown-menu__item:hover {
-  background-color: #f8f9fa;
   color: #2c3e50;
 }
 

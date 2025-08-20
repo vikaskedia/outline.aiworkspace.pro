@@ -75,6 +75,16 @@
               <el-icon><Link /></el-icon>
               Copy Internal Link
             </el-dropdown-item>
+            <el-dropdown-item divided disabled class="info-divider">
+              <div class="item-info-inline">
+                <div v-if="getCreatedInfo().date" class="info-line">
+                  <small>Created by {{ getCreatedInfo().by }} on {{ getCreatedInfo().date }}</small>
+                </div>
+                <div v-if="item.updated_at && getLastModifiedBy()" class="info-line">
+                  <small>Modified by {{ getLastModifiedBy() }} on {{ formatDate(item.updated_at) }}</small>
+                </div>
+              </div>
+            </el-dropdown-item>
             <el-dropdown-item divided command="delete">
               <el-icon><Delete /></el-icon>
               Delete
@@ -239,6 +249,8 @@
         :check-version-before-edit="checkVersionBeforeEdit"
         :handle-version-conflict="handleVersionConflict"
         :search-query="searchQuery"
+        :outline-metadata="outlineMetadata"
+        :user-info="userInfo"
         @update="updateChild"
         @move="handleMove"
         @delete="handleDelete"
@@ -270,7 +282,9 @@ export default {
     isNodeCollapsed: { type: Function, default: () => () => false },
     checkVersionBeforeEdit: { type: Function, default: () => async () => ({ canEdit: true }) },
     handleVersionConflict: { type: Function, default: () => async () => ({ canEdit: true }) },
-    searchQuery: { type: String, default: '' }
+    searchQuery: { type: String, default: '' },
+    outlineMetadata: { type: Object, default: () => ({}) },
+    userInfo: { type: Object, default: () => ({}) }
   },
   emits: ['update', 'move', 'delete', 'drilldown', 'navigate', 'indent', 'outdent', 'add-sibling', 'collapse-toggle'],
   setup(props, { emit }) {
@@ -352,6 +366,103 @@ export default {
       }).join('')
     }
 
+    // Date formatting helper
+    const formatDate = (dateString) => {
+      if (!dateString) return 'Unknown'
+      try {
+        const date = new Date(dateString)
+        return date.toLocaleString()
+      } catch {
+        return 'Invalid date'
+      }
+    }
+
+    // Get user name by ID from outline metadata  
+    const getUserNameById = (userId) => {
+      if (!userId) return 'Unknown user'
+      
+      // Check if we have user info in outlineMetadata
+      if (props.outlineMetadata?.users && props.outlineMetadata.users[userId]) {
+        return props.outlineMetadata.users[userId].name || props.outlineMetadata.users[userId].email || 'Unknown user'
+      }
+      
+      // Check if it's the current user
+      if (props.userInfo?.id === userId) {
+        return props.userInfo.name || props.userInfo.email || 'You'
+      }
+      
+      // For creator, try to get name from outline metadata
+      if (userId === props.outlineMetadata?.created_by && props.outlineMetadata?.created_by_name) {
+        return props.outlineMetadata.created_by_name
+      }
+      
+      // For UUID format, show a more user-friendly format
+      if (userId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+        //return `User ${userId.substring(0, 8)}...`
+        return `Someone`
+      }
+      
+      // Return the original if it's not a UUID
+      return userId
+    }
+
+    // Get creation information
+    const getCreatedInfo = () => {
+      // Check if this item has individual creation info first
+      if (props.item.created_at && props.item.created_by) {
+        // Prioritize stored name, then try to resolve by ID
+        const creatorName = props.item.created_by_name || getUserNameById(props.item.created_by) || 'Unknown'
+        return {
+          date: formatDate(props.item.created_at),
+          by: creatorName
+        }
+      }
+      
+      // Fallback to outline's creation info for older items
+      const outlineCreatedAt = props.outlineMetadata?.created_at
+      const outlineCreatedBy = props.outlineMetadata?.created_by
+      
+      if (outlineCreatedAt && outlineCreatedBy) {
+        return {
+          date: formatDate(outlineCreatedAt),
+          by: getUserNameById(outlineCreatedBy)
+        }
+      }
+      
+      return { date: null, by: null }
+    }
+
+    // Get last modified by user - check for stored editor info
+    const getLastModifiedBy = () => {
+      // First check if we have stored editor information on the item
+      if (props.item.updated_by_name) {
+        return props.item.updated_by_name
+      }
+      
+      if (props.item.updated_by) {
+        return getUserNameById(props.item.updated_by)
+      }
+      
+      // Check if the item has been specifically modified (has updated_at but different from creation time)
+      if (props.item.updated_at && props.outlineMetadata?.created_at) {
+        const itemModified = new Date(props.item.updated_at).getTime()
+        const outlineCreated = new Date(props.outlineMetadata.created_at).getTime()
+        
+        // If the item was modified after outline creation, it was actually edited
+        if (itemModified > outlineCreated + 1000) { // 1 second buffer for timing differences
+          // If no specific editor info, fallback to creator name
+          const creatorInfo = getCreatedInfo()
+          if (creatorInfo.by) {
+            return creatorInfo.by
+          }
+          return 'Someone'
+        }
+      }
+      
+      // If no specific modification, don't show a modifier
+      return null
+    }
+
     const renderedText = computed(() => {
       const base = linkify(props.item.text || 'Click to edit...')
       return applySearchHighlight(base)
@@ -388,22 +499,39 @@ export default {
       
       editing.value = false
       if (editText.value !== props.item.text) {
-        emit('update', {
+        const updatePayload = {
           id: props.item.id,
           text: editText.value,
           immediate: true
-        })
+        }
+        
+        // Add editor info if we have current user info
+        if (props.userInfo?.id) {
+          updatePayload.updated_by = props.userInfo.id
+          updatePayload.updated_by_name = props.userInfo.name || props.userInfo.email
+        }
+        
+        emit('update', updatePayload)
       }
     }
 
     const handleTextChange = () => {
       autoResize()
-      // Emit update immediately for real-time collaboration
-      emit('update', {
+      // Track who is editing this item
+      const updatePayload = {
         id: props.item.id,
         text: editText.value,
         immediate: true
-      })
+      }
+      
+      // Add editor info if we have current user info
+      if (props.userInfo?.id) {
+        updatePayload.updated_by = props.userInfo.id
+        updatePayload.updated_by_name = props.userInfo.name || props.userInfo.email
+      }
+      
+      // Emit update immediately for real-time collaboration
+      emit('update', updatePayload)
     }
 
     const autoResize = () => {
@@ -565,7 +693,20 @@ export default {
       ElMessage.info('Uploading image...')
       const giteaResult = await uploadImageToGitea(file)
       if (giteaResult.success) {
-        emit('update', { id: props.item.id, text: giteaResult.filename, fileUrl: giteaResult.url, immediate: true })
+        const updatePayload = { 
+          id: props.item.id, 
+          text: giteaResult.filename, 
+          fileUrl: giteaResult.url, 
+          immediate: true 
+        }
+        
+        // Add editor info if we have current user info
+        if (props.userInfo?.id) {
+          updatePayload.updated_by = props.userInfo.id
+          updatePayload.updated_by_name = props.userInfo.name || props.userInfo.email
+        }
+        
+        emit('update', updatePayload)
         ElMessage.success('Image uploaded')
         return
       }
@@ -575,7 +716,20 @@ export default {
           reader.onload = () => {
             const ext = (file.name.split('.').pop() || 'png').toLowerCase()
             const fileName = `pasted-image-${Date.now()}.${ext}`
-            emit('update', { id: props.item.id, text: fileName, fileUrl: reader.result, immediate: true })
+            const updatePayload = { 
+              id: props.item.id, 
+              text: fileName, 
+              fileUrl: reader.result, 
+              immediate: true 
+            }
+            
+            // Add editor info if we have current user info
+            if (props.userInfo?.id) {
+              updatePayload.updated_by = props.userInfo.id
+              updatePayload.updated_by_name = props.userInfo.name || props.userInfo.email
+            }
+            
+            emit('update', updatePayload)
             ElMessage.success('Image added (inline)')
           }
           reader.readAsDataURL(file)
@@ -743,8 +897,21 @@ export default {
       const newComment = { id: Date.now(), text: newCommentText.value.trim(), editing: false }
       comments.value.push(newComment)
       newCommentText.value = ''
-      // Persist to parent outline
-      emit('update', { id: props.item.id, text: props.item.text, comments: comments.value, immediate: true })
+      // Persist to parent outline with editor tracking
+      const updatePayload = { 
+        id: props.item.id, 
+        text: props.item.text, 
+        comments: comments.value, 
+        immediate: true 
+      }
+      
+      // Add editor info if we have current user info
+      if (props.userInfo?.id) {
+        updatePayload.updated_by = props.userInfo.id
+        updatePayload.updated_by_name = props.userInfo.name || props.userInfo.email
+      }
+      
+      emit('update', updatePayload)
       ElMessage.success('Comment added')
     }
 
@@ -756,7 +923,20 @@ export default {
     const saveComment = (comment) => {
       comment.editing = false
       delete comment.originalText
-      emit('update', { id: props.item.id, text: props.item.text, comments: comments.value, immediate: true })
+      const updatePayload = { 
+        id: props.item.id, 
+        text: props.item.text, 
+        comments: comments.value, 
+        immediate: true 
+      }
+      
+      // Add editor info if we have current user info
+      if (props.userInfo?.id) {
+        updatePayload.updated_by = props.userInfo.id
+        updatePayload.updated_by_name = props.userInfo.name || props.userInfo.email
+      }
+      
+      emit('update', updatePayload)
       ElMessage.success('Comment updated')
     }
 
@@ -770,7 +950,20 @@ export default {
       const index = comments.value.findIndex(c => c.id === commentId)
       if (index > -1) {
         comments.value.splice(index, 1)
-        emit('update', { id: props.item.id, text: props.item.text, comments: comments.value, immediate: true })
+        const updatePayload = { 
+          id: props.item.id, 
+          text: props.item.text, 
+          comments: comments.value, 
+          immediate: true 
+        }
+        
+        // Add editor info if we have current user info
+        if (props.userInfo?.id) {
+          updatePayload.updated_by = props.userInfo.id
+          updatePayload.updated_by_name = props.userInfo.name || props.userInfo.email
+        }
+        
+        emit('update', updatePayload)
         ElMessage.success('Comment deleted')
       }
     }
@@ -1088,6 +1281,10 @@ export default {
       resetLinkDialog,
       toggleCollapse,
       updateTooltipPosition,
+      formatDate,
+      getUserNameById,
+      getCreatedInfo,
+      getLastModifiedBy
     }
   }
 }
@@ -1391,6 +1588,71 @@ export default {
 .link-dialog-body { display: flex; flex-direction: column; gap: 10px; }
 .selected-text { font-size: 12px; color: #606266; margin: 0; }
 @keyframes fadeIn { from { opacity: 0; transform: translate(-50%, -4px);} to { opacity:1; transform: translate(-50%, -8px);} }
+
+/* Item Info Dialog Styles */
+.item-info-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.info-section {
+  border-bottom: 1px solid #ebeef5;
+  padding-bottom: 12px;
+}
+
+.info-section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.info-section h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.info-text {
+  margin: 0;
+  font-size: 13px;
+  color: #606266;
+  word-break: break-word;
+}
+
+.info-subtext {
+  margin: 4px 0 0 0;
+  font-size: 12px;
+  color: #909399;
+  font-style: italic;
+}
+
+/* Inline info in dropdown styles */
+.item-info-inline {
+  padding: 4px 0;
+  border-top: 1px solid #f0f0f0;
+  margin-top: 4px;
+}
+
+.info-line {
+  margin: 2px 0;
+}
+
+.info-line small {
+  font-size: 11px;
+  color: #999;
+  font-style: italic;
+  line-height: 1.3;
+}
+
+.info-divider {
+  cursor: default !important;
+  background: #fafafa !important;
+}
+
+.info-divider:hover {
+  background: #fafafa !important;
+}
 </style>
 
 <!-- Fix rows prop bindings in template -->
