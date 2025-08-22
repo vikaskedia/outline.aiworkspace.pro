@@ -575,6 +575,35 @@ export default {
         const { data: { user: authUser } } = await supabase.auth.getUser();
         if (authUser) {
           if (outlineId.value) {
+            // Check current server version before saving to detect conflicts
+            const { data: serverOutline, error: serverCheckError } = await supabase
+              .from('outlines')
+              .select('version')
+              .eq('id', outlineId.value)
+              .single();
+
+            if (serverCheckError) {
+              console.error('❌ Error checking server version:', serverCheckError);
+              throw serverCheckError;
+            }
+
+            // Detect version conflict - if server has newer version, prevent save
+            if (serverOutline.version > currentVersion.value) {
+              console.log('⚠️ Version conflict detected during save - server version:', serverOutline.version, 'local version:', currentVersion.value);
+              
+              ElNotification({
+                title: 'Save Conflict',
+                message: `Cannot save: The outline was updated by another user (server version ${serverOutline.version}, your version ${currentVersion.value}). Please refresh and try again.`,
+                type: 'warning',
+                duration: 7000,
+                showClose: true
+              });
+              
+              // Update our version tracking but don't save
+              currentVersion.value = serverOutline.version;
+              return;
+            }
+
             const nextVersion = (currentVersion.value || 1) + 1;
             const { error: updateErr, data: updated } = await supabase
               .from('outlines')
@@ -976,8 +1005,8 @@ export default {
       try {
         refreshing.value = true;
         
-        // In a real app, fetch from Supabase here
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Mock delay
+        // Actually reload from Supabase
+        await loadOutline();
         
         ElNotification({
           title: 'Synced',
@@ -999,45 +1028,104 @@ export default {
 
     // Check if current version matches server version
     async function checkVersionBeforeEdit() {
-      // In a real app, check against server version
-      return { canEdit: true };
+      if (!outlineId.value) {
+        // No outline saved yet, safe to edit
+        return { canEdit: true };
+      }
+
+      try {
+        // Check server version before allowing edit
+        const { data: serverOutline, error: serverCheckError } = await supabase
+          .from('outlines')
+          .select('version')
+          .eq('id', outlineId.value)
+          .single();
+
+        if (serverCheckError) {
+          console.error('❌ Error checking server version before edit:', serverCheckError);
+          // Allow editing but warn user
+          return { 
+            canEdit: true, 
+            warning: 'Could not verify latest version. Your changes might conflict with others.' 
+          };
+        }
+
+        if (serverOutline.version > currentVersion.value) {
+          console.log('⚠️ Outdated version detected before edit - server:', serverOutline.version, 'local:', currentVersion.value);
+          return {
+            canEdit: false,
+            isOutdated: true,
+            serverVersion: serverOutline.version,
+            currentVersion: currentVersion.value,
+            message: `Outline update required: ${serverOutline.version - currentVersion.value} new changes detected.`
+          };
+        }
+
+        // Version is current, safe to edit
+        return { canEdit: true };
+      } catch (error) {
+        console.error('❌ Error in version check before edit:', error);
+        // Allow editing but warn user
+        return { 
+          canEdit: true, 
+          warning: 'Could not verify latest version. Your changes might conflict with others.' 
+        };
+      }
     }
 
     // Handle version conflict with user choice
     async function handleVersionConflict(versionCheck) {
       return new Promise((resolve) => {
-        const conflictMessage = `The outline has been updated by another user while you were away.
+        const conflictMessage = `⚠️ **IMMEDIATE RELOAD REQUIRED**
+
+The outline has been updated by another user and your version is outdated.
 
 **Your version:** ${versionCheck.currentVersion}
 **Latest version:** ${versionCheck.serverVersion}
+**Changes behind:** ${versionCheck.serverVersion - versionCheck.currentVersion}
 
-To prevent data loss and conflicts, you need to reload the latest changes before editing.`;
+🚨 You MUST reload immediately to get the latest changes before editing.
+This prevents data loss and conflicts.`;
 
-        ElMessageBox.confirm(
+        ElMessageBox.alert(
           conflictMessage,
-          '🔄 Update Required - Reload Latest Version',
+          '🔄 RELOAD IMMEDIATELY - Outdated Version',
           {
-            confirmButtonText: 'Reload Latest',
-            cancelButtonText: 'Cancel',
-            type: 'warning'
+            confirmButtonText: '🔄 Reload Now',
+            type: 'warning',
+            showClose: false,
+            closeOnClickModal: false,
+            closeOnPressEscape: false,
+            center: true,
+            customStyle: {
+              width: '500px'
+            }
           }
         ).then(async () => {
-          // User chose to reload
+          // User clicked reload - immediately refresh
           try {
-            await manualRefresh();
+            refreshing.value = true;
+            await loadOutline(); // Reload the entire outline
+            ElNotification({
+              title: '✅ Reloaded Successfully',
+              message: 'Outline has been reloaded with the latest changes. You can now edit safely.',
+              type: 'success',
+              duration: 4000
+            });
             resolve({ canEdit: true, reloaded: true });
           } catch (error) {
+            console.error('❌ Failed to reload:', error);
+            ElNotification({
+              title: '❌ Reload Failed',
+              message: 'Could not reload latest version. Please refresh the page manually.',
+              type: 'error',
+              duration: 7000,
+              showClose: true
+            });
             resolve({ canEdit: false });
+          } finally {
+            refreshing.value = false;
           }
-        }).catch(() => {
-          // User cancelled - no editing allowed
-          ElNotification({
-            title: 'Edit Cancelled',
-            message: 'You need to sync with the latest version before editing.',
-            type: 'info',
-            duration: 4000
-          });
-          resolve({ canEdit: false });
         });
       });
     }
