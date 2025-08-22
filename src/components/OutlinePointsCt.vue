@@ -29,7 +29,8 @@
       <!-- Bullet Point -->
       <div 
         class="outline-bullet"
-        @click="startEdit"
+        :class="{ 'focusable': hasChildren }"
+        @click="handleBulletClick"
         draggable="true"
         @dragstart="handleDragStart"
       ></div>
@@ -471,6 +472,16 @@ export default {
     const handleTextClick = (e) => {
       if (e.target.closest('a')) return
       startEdit()
+    }
+
+    const handleBulletClick = () => {
+      // If item has children, trigger drilldown (focus)
+      if (hasChildren.value) {
+        emit('drilldown', props.item.id)
+      } else {
+        // If no children, start editing as before
+        startEdit()
+      }
     }
 
     const startEdit = async () => {
@@ -1230,6 +1241,7 @@ export default {
       selectionTooltipVisible,
       selectionTooltipStyle,
       handleTextClick,
+      handleBulletClick,
       startEdit,
       finishEdit,
       handleTextChange,
@@ -1372,6 +1384,18 @@ export default {
   border-color: #4B5155;
   transform: scale(1.2);
 }
+
+/*.outline-bullet.focusable {
+  background: #1976d2;
+  border-color: #0d47a1;
+}
+
+.outline-bullet.focusable:hover {
+  background: #0d47a1;
+  border-color: #1976d2;
+  transform: scale(1.3);
+  box-shadow: 0 2px 8px rgba(25, 118, 210, 0.4);
+}*/
 
 .collapse-toggle {
   display: inline-block;
