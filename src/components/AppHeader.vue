@@ -366,6 +366,26 @@ export default {
             window.location.href = 'https://canvas.aiworkspace.pro'
           }
           break
+
+        case 'files':
+          // Redirect to files.aiworkspace.pro
+          if (workspace) {
+            const filesUrl = `https://drive.aiworkspace.pro/single-workspace/${workspace.id}/files`
+            window.location.href = filesUrl
+          } else {
+            window.location.href = 'https://drive.aiworkspace.pro'
+          }
+          break
+
+        case 'tasks':
+          // Redirect to tasks.aiworkspace.pro
+          if (workspace) {
+            const tasksUrl = `https://tasks.aiworkspace.pro/single-workspace/${workspace.id}/tasks`
+            window.location.href = tasksUrl
+          } else {
+            window.location.href = 'https://tasks.aiworkspace.pro'
+          }
+          break
         
         default:
           // Redirect to main app.aiworkspace.pro for all other items
