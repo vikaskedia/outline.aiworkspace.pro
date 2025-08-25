@@ -324,13 +324,13 @@ export default {
     
     let refreshInterval = null;
 
-    // Create debounced save function
+    // Create debounced save function - saves after 1 second of inactivity
     const debouncedSave = debounce(async () => {
       // Only save if there are changes and we're not already saving
       if (hasChanges.value && !saving.value) {
         await saveOutline();
       }
-    }, 2000);
+    }, 1000);
 
     // Get localStorage keys for current workspace
     const getLocalStorageKey = () => `outline_${workspaceId.value}`;

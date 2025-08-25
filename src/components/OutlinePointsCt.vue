@@ -531,8 +531,8 @@ export default {
       // Track who is editing this item
       const updatePayload = {
         id: props.item.id,
-        text: editText.value,
-        immediate: true
+        text: editText.value
+        // Removed immediate: true to use debounced saving (1 second after stopping typing)
       }
       
       // Add editor info if we have current user info
@@ -541,7 +541,7 @@ export default {
         updatePayload.updated_by_name = props.userInfo.name || props.userInfo.email
       }
       
-      // Emit update immediately for real-time collaboration
+      // Emit update for debounced save (saves after 1 second of inactivity)
       emit('update', updatePayload)
     }
 
