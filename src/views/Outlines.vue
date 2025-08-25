@@ -450,13 +450,16 @@ export default {
     ];
 
     // Helper to ensure all items have autoFocus: false
-    function ensureAutoFocusProp(items) {
+    function ensureAutoFocusProp(items, clearAutoFocus = false) {
       for (const item of items) {
-        if (item.autoFocus === undefined) {
+        if (clearAutoFocus) {
+          // Clear autoFocus for synced content to prevent conflicts
+          item.autoFocus = false;
+        } else if (item.autoFocus === undefined) {
           item.autoFocus = false;
         }
         if (item.children) {
-          ensureAutoFocusProp(item.children);
+          ensureAutoFocusProp(item.children, clearAutoFocus);
         }
       }
     }
@@ -569,7 +572,7 @@ export default {
             if (!hasChanges.value) {
               console.log('✅ Applying cross-tab outline update');
               outline.value = newOutlineData;
-              ensureAutoFocusProp(outline.value);
+              ensureAutoFocusProp(outline.value, true);
             } else {
               console.log('⚠️ Skipping cross-tab update - local changes exist');
             }
@@ -762,7 +765,19 @@ export default {
     function onOutlineUpdate({ id, text, comments, fileUrl, immediate, updated_by, updated_by_name }) {
       updateTextById(outline.value, id, text, { comments, fileUrl, updated_by, updated_by_name });
       hasChanges.value = checkForChanges(outline.value);
-      debouncedSave();
+      
+      // If immediate save is requested (e.g., during text changes), save immediately
+      if (immediate && hasChanges.value && !saving.value) {
+        // Cancel any pending debounced save and save immediately
+        if (debouncedSave && debouncedSave.cancel) {
+          debouncedSave.cancel();
+        }
+        console.log('Immediate save triggered from onOutlineUpdate');
+        saveOutline();
+      } else {
+        // Otherwise, use debounced save
+        debouncedSave();
+      }
     }
 
     function handleMove({ draggedId, targetId, position }) {
@@ -1048,7 +1063,12 @@ export default {
           created_by_name: creatorName
         };
         target.children.push(newItem);
-        hasChanges.value = true; debouncedSave();
+        hasChanges.value = true; 
+        // Immediate save for new items to ensure proper sync
+        if (!saving.value) {
+          console.log('Immediate save triggered for new child item');
+          saveOutline();
+        }
         return;
       }
       const parent = findParentById(outline.value, id);
@@ -1065,7 +1085,12 @@ export default {
         created_by_name: creatorName
       };
       parentArray.splice(itemIndex + 1, 0, newItem);
-      hasChanges.value = true; debouncedSave();
+      hasChanges.value = true; 
+      // Immediate save for new items to ensure proper sync
+      if (!saving.value) {
+        console.log('Immediate save triggered for new sibling item');
+        saveOutline();
+      }
     }
 
     // Manual refresh function for user-triggered sync
@@ -1357,6 +1382,8 @@ This prevents data loss and conflicts.`;
                       // Update local state
                       try {
                         await nextTick(() => {
+                          // Clear autoFocus properties from synced content to prevent conflicts
+                          ensureAutoFocusProp(freshContent, true);
                           outline.value = freshContent;
                           currentVersion.value = newVersion;
                           lastSavedContent.value = JSON.parse(JSON.stringify(freshContent));
@@ -1365,6 +1392,7 @@ This prevents data loss and conflicts.`;
                       } catch (updateError) {
                         console.warn('⚠️ Error updating local state, applying manually:', updateError);
                         // Fallback to direct assignment if nextTick fails
+                        ensureAutoFocusProp(freshContent, true);
                         outline.value = freshContent;
                         currentVersion.value = newVersion;
                         lastSavedContent.value = JSON.parse(JSON.stringify(freshContent));
@@ -1421,7 +1449,9 @@ This prevents data loss and conflicts.`;
                         // Update local state to match the server
                         try {
                           await nextTick(() => {
-                            outline.value = JSON.parse(JSON.stringify(newContent));
+                            const syncedContent = JSON.parse(JSON.stringify(newContent));
+                            ensureAutoFocusProp(syncedContent, true);
+                            outline.value = syncedContent;
                             currentVersion.value = newVersion;
                             lastSavedContent.value = JSON.parse(JSON.stringify(newContent));
                             hasChanges.value = false;
@@ -1429,7 +1459,9 @@ This prevents data loss and conflicts.`;
                         } catch (syncUpdateError) {
                           console.warn('⚠️ Error updating state during sync, applying manually:', syncUpdateError);
                           // Fallback to direct assignment if nextTick fails
-                          outline.value = JSON.parse(JSON.stringify(newContent));
+                          const syncedContent = JSON.parse(JSON.stringify(newContent));
+                          ensureAutoFocusProp(syncedContent, true);
+                          outline.value = syncedContent;
                           currentVersion.value = newVersion;
                           lastSavedContent.value = JSON.parse(JSON.stringify(newContent));
                           hasChanges.value = false;
