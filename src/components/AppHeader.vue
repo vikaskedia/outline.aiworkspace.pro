@@ -356,6 +356,16 @@ export default {
             router.push('/outlines')
           }
           break
+
+        case 'ai-portfolios':
+          // Redirect to spreadsheet.aiworkspace.pro
+          if (workspace) {
+            const spreadsheetUrl = `https://spreadsheet.aiworkspace.pro/single-workspace/${workspace.id}/ai-portfolios`
+            window.location.href = spreadsheetUrl
+          } else {
+            window.location.href = 'https://spreadsheet.aiworkspace.pro'
+          }
+          break
         
         case 'canvas':
           // Redirect to canvas.aiworkspace.pro
