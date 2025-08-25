@@ -469,7 +469,6 @@ export default {
       authCheckDone.value = false; // reset before each load
       if (!workspaceId.value) { authCheckDone.value = true; return; }
       loadCollapsedState();
-      const focusParam = route.query.focus; if (focusParam) focusedId.value = parseInt(focusParam);
       hasChanges.value = false;
       try {
         const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -482,6 +481,7 @@ export default {
         }
         isAuthenticated.value = true;
 
+        console.log('🔍 Loading outline for workspace:', workspaceId.value);
         const { data: existingOutline, error: outlineError } = await supabase
           .from('outlines')
           .select('id, content, version, title, created_by, created_at, updated_at')
@@ -490,6 +490,7 @@ export default {
           .limit(1)
           .maybeSingle();
         if (outlineError) console.warn('Outline fetch error', outlineError.message);
+        console.log('📄 Loaded outline:', existingOutline ? 'Found' : 'Not found', existingOutline?.id);
         if (existingOutline && existingOutline.content) {
           outlineId.value = existingOutline.id;
           outline.value = Array.isArray(existingOutline.content) ? existingOutline.content : [];
@@ -505,6 +506,7 @@ export default {
             created_by_name: userInfo.value?.id === existingOutline.created_by ? userInfo.value.name || userInfo.value.email : null
           };
         } else {
+          console.log('📝 No existing outline found, creating default outline');
           const initial = deepClone(defaultOutline);
           const { data: created, error: createErr } = await supabase
             .from('outlines')
@@ -546,6 +548,10 @@ export default {
       }
 
       updatePageTitle();
+      
+      // Validate and restore focus state after outline is fully loaded
+      await validateAndRestoreFocus();
+      
       authCheckDone.value = true;
       
       // Set up real-time subscription after loading outline
@@ -573,6 +579,9 @@ export default {
               console.log('✅ Applying cross-tab outline update');
               outline.value = newOutlineData;
               ensureAutoFocusProp(outline.value, true);
+              
+              // Validate focus after cross-tab update
+              validateAndRestoreFocus();
             } else {
               console.log('⚠️ Skipping cross-tab update - local changes exist');
             }
@@ -736,8 +745,11 @@ export default {
 
     // Find item by id (recursive)
     function findItemById(items, id) {
+      if (!id) return null;
+      
       for (const item of items) {
-        if (item.id === id) {
+        // Check both number and string comparison for ID matching
+        if (item.id == id || item.id === id || item.id.toString() === id.toString()) {
           return item;
         }
         if (item.children) {
@@ -750,8 +762,11 @@ export default {
 
     // Find parent of item by id (recursive)
     function findParentById(items, id, parent = null) {
+      if (!id) return null;
+      
       for (const item of items) {
-        if (item.id === id) {
+        // Check both number and string comparison for ID matching
+        if (item.id == id || item.id === id || item.id.toString() === id.toString()) {
           return parent;
         }
         if (item.children) {
@@ -849,10 +864,26 @@ export default {
     }
 
     function getFocusedOutline() {
-      if (!focusedId.value) return outline.value;
+      console.log('🎯 getFocusedOutline called:', {
+        focusedId: focusedId.value,
+        outlineLength: outline.value.length
+      });
+      
+      if (!focusedId.value) {
+        console.log('📋 No focused ID - returning full outline');
+        return outline.value;
+      }
       
       const focusedItem = findItemById(outline.value, focusedId.value);
-      return focusedItem ? focusedItem.children || [] : outline.value;
+      console.log('🔍 Found focused item:', {
+        found: !!focusedItem,
+        hasChildren: focusedItem?.children?.length || 0,
+        text: focusedItem?.text?.slice(0, 50)
+      });
+      
+      const result = focusedItem ? focusedItem.children || [] : outline.value;
+      console.log('📤 Returning focused outline with', result.length, 'items');
+      return result;
     }
 
     function getFilteredOutline() {
@@ -882,10 +913,19 @@ export default {
 
     // Helper to find the path from root to focused node
     function findPathToNode(items, id, path = []) {
+      if (!id) return null;
+      
       for (const item of items) {
         const currentPath = [...path, item];
         
-        if (item.id === id) {
+        // Check both number and string comparison for ID matching
+        if (item.id == id || item.id === id || item.id.toString() === id.toString()) {
+          console.log('🎯 Found path to node:', {
+            targetId: id,
+            foundItemId: item.id,
+            pathLength: currentPath.length,
+            path: currentPath.map(p => ({ id: p.id, text: p.text?.slice(0, 20) }))
+          });
           return currentPath;
         }
         
@@ -898,7 +938,13 @@ export default {
     }
 
     const breadcrumbPath = computed(() => {
-      return findPathToNode(outline.value, focusedId.value) || [];
+      const path = findPathToNode(outline.value, focusedId.value) || [];
+      console.log('🍞 Breadcrumb path computed:', {
+        focusedId: focusedId.value,
+        pathLength: path.length,
+        path: path.map(p => ({ id: p.id, text: p.text?.slice(0, 30) }))
+      });
+      return path;
     });
 
     function handleBreadcrumb(node, idx) {
@@ -1266,6 +1312,69 @@ This prevents data loss and conflicts.`;
       outline.value.push(newItem);
     }
 
+    // Helper function to get all item IDs for debugging
+    function getAllItemIds(items) {
+      const ids = [];
+      function collectIds(itemArray) {
+        for (const item of itemArray) {
+          ids.push(item.id);
+          if (item.children && item.children.length) {
+            collectIds(item.children);
+          }
+        }
+      }
+      collectIds(items);
+      return ids;
+    }
+
+    // Function to validate and restore focus state
+    async function validateAndRestoreFocus() {
+      const focusParam = route.query.focus;
+      if (!focusParam) {
+        focusedId.value = null;
+        return;
+      }
+
+      // Try both string and number formats since IDs can be either
+      const targetIdNum = parseInt(focusParam);
+      const targetIdStr = focusParam.toString();
+      
+      if (isNaN(targetIdNum)) {
+        console.warn('Invalid focus parameter:', focusParam);
+        focusedId.value = null;
+        return;
+      }
+
+      // Check if the focused item exists in the loaded outline (try both formats)
+      console.log('🔍 Validating focus for item:', targetIdNum, '(string:', targetIdStr, ') Outline length:', outline.value.length);
+      let focusedItem = findItemById(outline.value, targetIdNum);
+      if (!focusedItem) {
+        focusedItem = findItemById(outline.value, targetIdStr);
+      }
+      if (focusedItem) {
+        console.log('✅ Restoring focus to item:', targetIdNum, focusedItem.text?.slice(0, 50));
+        focusedId.value = targetIdNum;
+        
+        // Force UI update by triggering reactivity
+        await nextTick();
+        console.log('🎯 Focus state after restoration:', {
+          focusedId: focusedId.value,
+          hasChildren: focusedItem.children?.length || 0,
+          breadcrumbPath: breadcrumbPath.value.length
+        });
+        
+        // Update page title for the focused item
+        updatePageTitle();
+      } else {
+        console.warn('⚠️ Focused item not found in outline:', targetIdNum, 'Available IDs:', getAllItemIds(outline.value));
+        // Clear invalid focus from URL
+        const newQuery = { ...route.query };
+        delete newQuery.focus;
+        router.replace({ query: newQuery });
+        focusedId.value = null;
+      }
+    }
+
     // Function to subscribe to real-time changes
     async function subscribeToChanges() {
       if (!workspaceId.value || !outlineId.value) return;
@@ -1388,6 +1497,9 @@ This prevents data loss and conflicts.`;
                           currentVersion.value = newVersion;
                           lastSavedContent.value = JSON.parse(JSON.stringify(freshContent));
                           hasChanges.value = false;
+                          
+                          // Validate focus after sync update
+                          validateAndRestoreFocus();
                         });
                       } catch (updateError) {
                         console.warn('⚠️ Error updating local state, applying manually:', updateError);
@@ -1397,6 +1509,9 @@ This prevents data loss and conflicts.`;
                         currentVersion.value = newVersion;
                         lastSavedContent.value = JSON.parse(JSON.stringify(freshContent));
                         hasChanges.value = false;
+                        
+                        // Validate focus after sync update
+                        validateAndRestoreFocus();
                       }
 
                       // Update localStorage
@@ -1455,6 +1570,9 @@ This prevents data loss and conflicts.`;
                             currentVersion.value = newVersion;
                             lastSavedContent.value = JSON.parse(JSON.stringify(newContent));
                             hasChanges.value = false;
+                            
+                            // Validate focus after sync update
+                            validateAndRestoreFocus();
                           });
                         } catch (syncUpdateError) {
                           console.warn('⚠️ Error updating state during sync, applying manually:', syncUpdateError);
@@ -1465,6 +1583,9 @@ This prevents data loss and conflicts.`;
                           currentVersion.value = newVersion;
                           lastSavedContent.value = JSON.parse(JSON.stringify(newContent));
                           hasChanges.value = false;
+                          
+                          // Validate focus after sync update
+                          validateAndRestoreFocus();
                         }
 
                         // Update localStorage
