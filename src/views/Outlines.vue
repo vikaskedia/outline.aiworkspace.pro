@@ -544,15 +544,65 @@ export default {
 
       updatePageTitle();
       authCheckDone.value = true;
+      
+      // Set up real-time subscription after loading outline
+      if (outlineId.value && isAuthenticated.value) {
+        await subscribeToChanges();
+      }
     }
 
     onMounted(async () => {
       await loadOutline();
+      
+      // Add localStorage cross-tab synchronization
+      const handleStorageChange = (event) => {
+        // Only respond to changes for our workspace
+        const localStorageKey = getLocalStorageKey();
+        const versionKey = getVersionKey();
+        
+        if (event.key === localStorageKey && event.newValue) {
+          try {
+            const newOutlineData = JSON.parse(event.newValue);
+            console.log('📡 Cross-tab localStorage sync detected');
+            
+            // Only update if we don't have unsaved changes
+            if (!hasChanges.value) {
+              console.log('✅ Applying cross-tab outline update');
+              outline.value = newOutlineData;
+              ensureAutoFocusProp(outline.value);
+            } else {
+              console.log('⚠️ Skipping cross-tab update - local changes exist');
+            }
+          } catch (error) {
+            console.warn('⚠️ Error parsing cross-tab outline data:', error);
+          }
+        } else if (event.key === versionKey && event.newValue) {
+          // Update version tracking from other tabs
+          const newVersion = parseInt(event.newValue);
+          if (newVersion > currentVersion.value) {
+            console.log('📝 Updating version from cross-tab sync:', newVersion);
+            currentVersion.value = newVersion;
+          }
+        }
+      };
+      
+      // Listen for localStorage changes from other tabs
+      window.addEventListener('storage', handleStorageChange);
+      
+      // Store handler for cleanup
+      window.outlineStorageHandler = handleStorageChange;
     });
 
     // Reload outline when workspace changes via navigation (same component instance)
     watch(workspaceId, async (newVal, oldVal) => {
       if (!newVal || newVal === oldVal) return;
+      
+      // Cleanup existing subscription
+      if (realtimeSubscription.value) {
+        realtimeSubscription.value.unsubscribe();
+        realtimeSubscription.value = null;
+      }
+      
       // Reset state before loading new workspace outline
       outline.value = [];
       outlineId.value = null;
@@ -561,7 +611,22 @@ export default {
       focusedId.value = null;
       collapsedNodes.value = new Set();
       lastSaveTime.value = null;
+      firstUpdateReceived.value = false;
       await loadOutline();
+    });
+
+    // Cleanup real-time subscription on unmount
+    onUnmounted(() => {
+      if (realtimeSubscription.value) {
+        realtimeSubscription.value.unsubscribe();
+        realtimeSubscription.value = null;
+      }
+      
+      // Cleanup localStorage event listener
+      if (window.outlineStorageHandler) {
+        window.removeEventListener('storage', window.outlineStorageHandler);
+        delete window.outlineStorageHandler;
+      }
     });
 
     async function saveOutline() {
@@ -607,7 +672,12 @@ export default {
             const nextVersion = (currentVersion.value || 1) + 1;
             const { error: updateErr, data: updated } = await supabase
               .from('outlines')
-              .update({ content: outline.value, updated_at: new Date().toISOString(), version: nextVersion })
+              .update({ 
+                content: outline.value, 
+                updated_at: new Date().toISOString(), 
+                version: nextVersion,
+                render_id: outlineRenderID.value // Add render ID to track which tab made the change
+              })
               .eq('id', outlineId.value)
               .select('version')
               .single();
@@ -1169,6 +1239,299 @@ This prevents data loss and conflicts.`;
         autoFocus: true
       };
       outline.value.push(newItem);
+    }
+
+    // Function to subscribe to real-time changes
+    async function subscribeToChanges() {
+      if (!workspaceId.value || !outlineId.value) return;
+
+      // Unsubscribe from any existing subscription
+      if (realtimeSubscription.value) {
+        realtimeSubscription.value.unsubscribe();
+      }
+
+      // Subscribe to changes on the outlines table
+      realtimeSubscription.value = supabase
+        .channel(`outline_changes_${outlineId.value}_${outlineRenderID.value}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
+            schema: 'public',
+            table: 'outlines',
+            filter: `id=eq.${outlineId.value}`
+          },
+          async (payload) => {
+            console.log('🔄 Received real-time update:', {
+              eventType: payload.eventType,
+              newVersion: payload.new?.version,
+              currentLocalVersion: currentVersion.value,
+              updateRenderID: payload.new?.render_id,
+              ourRenderID: outlineRenderID.value,
+              isSaving: saving.value
+            });
+            
+            // Check if this update came from our own tab
+            const updateRenderID = payload.new?.render_id;
+            const updateVersion = payload.new?.version;
+            
+            if (updateRenderID === outlineRenderID.value) {
+              console.log('⏭️ Skipping update - this came from our own tab (renderID match)');
+              // Update our local version tracking to stay in sync
+              if (updateVersion && updateVersion > currentVersion.value) {
+                currentVersion.value = updateVersion;
+                localStorage.setItem(getVersionKey(), updateVersion.toString());
+              }
+              return;
+            }
+            
+            // If we're currently saving, skip processing to avoid race conditions
+            if (saving.value) {
+              console.log('⏭️ Skipping update - currently saving (avoiding race condition)');
+              return;
+            }
+            
+            // If we just saved recently (within 2 seconds), skip processing
+            if (lastSaveTime.value && (Date.now() - new Date(lastSaveTime.value).getTime()) < 2000) {
+              console.log('⏭️ Skipping update - recent save detected (avoiding post-save conflict)');
+              // Still update version tracking if the received version is higher
+              if (updateVersion && updateVersion > currentVersion.value) {
+                console.log('📝 Updating version after recent save:', updateVersion);
+                currentVersion.value = updateVersion;
+                localStorage.setItem(getVersionKey(), updateVersion.toString());
+              }
+              return;
+            }
+
+            // Add a small delay to avoid immediate notifications after saves
+            await new Promise(resolve => setTimeout(resolve, 300));
+
+            // Skip notifications for the first update after page load to avoid spam
+            const isFirstUpdate = !firstUpdateReceived.value;
+            firstUpdateReceived.value = true;
+
+            try {
+              // For UPDATE events
+              if (payload.eventType === 'UPDATE') {
+                const newContent = payload.new.content;
+                const newVersion = payload.new.version;
+
+                console.log('📊 Version check:', {
+                  current: currentVersion.value,
+                  received: newVersion,
+                  updateRenderID,
+                  ourRenderID: outlineRenderID.value
+                });
+
+                // Always update version tracking, regardless of content merge
+                const versionIsNewer = newVersion > currentVersion.value;
+                const versionIsSame = newVersion === currentVersion.value;
+                
+                if (versionIsNewer || versionIsSame) {
+                  console.log('🔄 Processing update from another tab');
+                  
+                  // Safe content comparison with error handling
+                  let currentContentStr, newContentStr, contentIsDifferent;
+                  try {
+                    // Create a deep clone to avoid reactive object issues during comparison
+                    const currentContentSnapshot = JSON.parse(JSON.stringify(outline.value));
+                    currentContentStr = JSON.stringify(currentContentSnapshot);
+                    newContentStr = JSON.stringify(newContent);
+                    contentIsDifferent = currentContentStr !== newContentStr;
+                  } catch (serializationError) {
+                    console.warn('⚠️ Content comparison failed, assuming content is different:', serializationError);
+                    // If serialization fails, assume content is different and proceed safely
+                    contentIsDifferent = true;
+                    currentContentStr = '';
+                    newContentStr = JSON.stringify(newContent);
+                  }
+                  
+                  if (contentIsDifferent) {
+                    console.log('📝 Content is different, deciding how to merge...');
+                    
+                    if (!hasChanges.value) {
+                      // No local changes - safe to update completely
+                      console.log('✅ No local changes - applying remote update');
+                      const freshContent = JSON.parse(JSON.stringify(newContent));
+                      
+                      // Update local state
+                      try {
+                        await nextTick(() => {
+                          outline.value = freshContent;
+                          currentVersion.value = newVersion;
+                          lastSavedContent.value = JSON.parse(JSON.stringify(freshContent));
+                          hasChanges.value = false;
+                        });
+                      } catch (updateError) {
+                        console.warn('⚠️ Error updating local state, applying manually:', updateError);
+                        // Fallback to direct assignment if nextTick fails
+                        outline.value = freshContent;
+                        currentVersion.value = newVersion;
+                        lastSavedContent.value = JSON.parse(JSON.stringify(freshContent));
+                        hasChanges.value = false;
+                      }
+
+                      // Update localStorage
+                      try {
+                        const localStorageKey = getLocalStorageKey();
+                        const versionKey = getVersionKey();
+                        localStorage.setItem(localStorageKey, JSON.stringify(freshContent));
+                        localStorage.setItem(versionKey, newVersion.toString());
+                        localStorage.setItem(`${localStorageKey}_last_saved`, JSON.stringify(freshContent));
+                      } catch (storageError) {
+                        console.warn('⚠️ Failed to update localStorage:', storageError);
+                        // Continue execution even if localStorage fails
+                      }
+
+                      // Only show notification if this is a significant structural change
+                      // and it's not the first update after page load
+                      const currentItemCount = JSON.stringify(outline.value).split('"id":').length - 1;
+                      const newItemCount = JSON.stringify(freshContent).split('"id":').length - 1;
+                      const hasStructuralChanges = currentItemCount !== newItemCount;
+                      
+                      if (hasStructuralChanges && !isFirstUpdate) {
+                        ElNotification({
+                          title: 'Outline Updated',
+                          message: 'The outline structure has been updated from another tab',
+                          type: 'success',
+                          duration: 3000
+                        });
+                      }
+                    } else {
+                      // We have local changes - check if they're actually conflicting
+                      console.log('⚠️ Local changes detected - checking for actual conflicts');
+                      
+                      // Check if our local changes are the same as what we're receiving
+                      let localChangesStr, remoteChangesStr;
+                      try {
+                        const localSnapshot = JSON.parse(JSON.stringify(outline.value));
+                        localChangesStr = JSON.stringify(localSnapshot);
+                        remoteChangesStr = JSON.stringify(newContent);
+                      } catch (comparisonError) {
+                        console.warn('⚠️ Local changes comparison failed, treating as conflict:', comparisonError);
+                        // If comparison fails, treat as a conflict to be safe
+                        localChangesStr = 'local_error';
+                        remoteChangesStr = 'remote_content';
+                      }
+                      
+                      if (localChangesStr === remoteChangesStr) {
+                        // Our local changes match the remote content - this is a sync, not a conflict
+                        console.log('✅ Local changes match remote content - applying sync');
+                        
+                        // Update local state to match the server
+                        try {
+                          await nextTick(() => {
+                            outline.value = JSON.parse(JSON.stringify(newContent));
+                            currentVersion.value = newVersion;
+                            lastSavedContent.value = JSON.parse(JSON.stringify(newContent));
+                            hasChanges.value = false;
+                          });
+                        } catch (syncUpdateError) {
+                          console.warn('⚠️ Error updating state during sync, applying manually:', syncUpdateError);
+                          // Fallback to direct assignment if nextTick fails
+                          outline.value = JSON.parse(JSON.stringify(newContent));
+                          currentVersion.value = newVersion;
+                          lastSavedContent.value = JSON.parse(JSON.stringify(newContent));
+                          hasChanges.value = false;
+                        }
+
+                        // Update localStorage
+                        try {
+                          const localStorageKey = getLocalStorageKey();
+                          const versionKey = getVersionKey();
+                          localStorage.setItem(localStorageKey, JSON.stringify(newContent));
+                          localStorage.setItem(versionKey, newVersion.toString());
+                          localStorage.setItem(`${localStorageKey}_last_saved`, JSON.stringify(newContent));
+                        } catch (syncStorageError) {
+                          console.warn('⚠️ Failed to update localStorage during sync:', syncStorageError);
+                          // Continue execution even if localStorage fails
+                        }
+
+                        // Silently sync - no notification needed for seamless sync
+                        console.log('✅ Changes synchronized between tabs');
+                      } else {
+                        // Actual conflict - local changes are different from remote
+                        console.log('⚠️ Actual conflict detected - preserving local changes');
+                        
+                        // Update version and saved content reference for conflict tracking
+                        currentVersion.value = newVersion;
+                        lastSavedContent.value = JSON.parse(JSON.stringify(newContent));
+                        
+                        // Recalculate hasChanges based on new remote content
+                        hasChanges.value = checkForChanges(outline.value);
+                        
+                        // Update localStorage with remote version info but keep local content
+                        try {
+                          const versionKey = getVersionKey();
+                          localStorage.setItem(versionKey, newVersion.toString());
+                          localStorage.setItem(`${getLocalStorageKey()}_last_saved`, JSON.stringify(newContent));
+                        } catch (conflictStorageError) {
+                          console.warn('⚠️ Failed to update localStorage during conflict handling:', conflictStorageError);
+                          // Continue execution even if localStorage fails
+                        }
+                        
+                        // Show conflict notification only for real conflicts, but only if not first update
+                        if (!isFirstUpdate) {
+                          ElNotification({
+                            title: 'Sync Conflict Detected',
+                            message: 'Another user updated the outline while you have different unsaved changes. Your changes are preserved.',
+                            type: 'warning',
+                            duration: 5000,
+                            showClose: true
+                          });
+                        }
+                      }
+                    }
+                  } else {
+                    // Content is the same, just update version tracking
+                    console.log('📄 Content is identical - updating version only');
+                    currentVersion.value = newVersion;
+                    lastSavedContent.value = JSON.parse(JSON.stringify(newContent));
+                    hasChanges.value = checkForChanges(outline.value);
+                    
+                    // Update localStorage version
+                    try {
+                      const versionKey = getVersionKey();
+                      localStorage.setItem(versionKey, newVersion.toString());
+                    } catch (versionStorageError) {
+                      console.warn('⚠️ Failed to update version in localStorage:', versionStorageError);
+                      // Continue execution even if localStorage fails
+                    }
+                  }
+                } else {
+                  console.log('⏪ Received older version - ignoring');
+                }
+              }
+            } catch (error) {
+              console.error('❌ Error handling real-time update:', error);
+              
+              // Try to recover by refreshing the outline
+              try {
+                await loadOutline();
+                console.log('🔄 Successfully recovered from sync error');
+              } catch (recoveryError) {
+                console.error('❌ Failed to recover from sync error:', recoveryError);
+              }
+            }
+          }
+        )
+        .subscribe((status) => {
+          console.log('📡 Subscription status:', status);
+          
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ Successfully subscribed to outline changes');
+          } else if (status === 'CLOSED') {
+            console.log('❌ Subscription closed - attempting to reconnect...');
+            // Retry subscription after a delay
+            setTimeout(() => {
+              if (outlineId.value && workspaceId.value) {
+                subscribeToChanges();
+              }
+            }, 2000);
+          } else {
+            console.log('📡 Subscription status changed:', status);
+          }
+        });
     }
 
     return { 
