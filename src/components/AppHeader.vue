@@ -22,6 +22,16 @@
             </span>
             <template #dropdown>
               <el-dropdown-menu class="workspace-tree-dropdown">
+                <!-- All workspace option -->
+                <el-dropdown-item command="all-workspace">
+                  <div class="workspace-dropdown-item">
+                    <span class="workspace-icon">🌐</span>
+                    <span>All workspace</span>
+                  </div>
+                </el-dropdown-item>
+                <el-dropdown-item v-if="flattenedWorkspaces.length > 0" divided disabled>
+                  <!-- Divider -->
+                </el-dropdown-item>
                 <el-dropdown-item 
                   v-for="w in flattenedWorkspaces" 
                   :key="w.id"
@@ -315,6 +325,12 @@ export default {
     // Handle navigation commands
     const handleNavCommand = (command) => {
       console.log('Navigation command:', command)
+      
+      // Handle all workspace navigation
+      if (command === 'all-workspace') {
+        window.location.href = 'https://all-ws-dashboard.aiworkspace.pro/all-workspace/dashboard'
+        return
+      }
       
       // Handle workspace switching from assigned workspaces dropdown
       if (command.startsWith('workspace-')) {
