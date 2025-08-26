@@ -274,7 +274,14 @@ function generateRenderID() {
 
 // Generate a summary of changes between two outline versions
 function generateChangesSummary(oldOutline, newOutline) {
-  if (!oldOutline || !newOutline) return 'Changes made';
+  if (!oldOutline && !newOutline) return 'No content';
+  if (!oldOutline) return 'Initial content added';
+  if (!newOutline) return 'Content removed';
+  
+  // Handle single content case (no comparison needed)
+  if (!Array.isArray(oldOutline) || !Array.isArray(newOutline)) {
+    return 'Content updated';
+  }
   
   const changes = [];
   const oldItems = flattenOutlineForDiff(oldOutline);
@@ -626,6 +633,26 @@ export default {
             ensureAutoFocusProp(outline.value);
             lastSavedContent.value = deepClone(outline.value);
             currentVersion.value = created.version || 1;
+            
+            // Save initial version to history for new outlines
+            try {
+              const { error: versionInsertError } = await supabase
+                .from('outline_versions')
+                .insert({
+                  outline_id: created.id,
+                  content: initial,
+                  version: currentVersion.value,
+                  created_by: authUser.id,
+                  comment: 'Initial outline creation'
+                });
+              
+              if (versionInsertError) {
+                console.warn('Failed to save initial version history:', versionInsertError.message);
+              }
+            } catch (versionError) {
+              console.warn('Error saving initial version history:', versionError);
+            }
+            
             // Store metadata for new outline
             currentOutlineData.value = {
               created_by: authUser.id,
@@ -791,16 +818,21 @@ export default {
             const nextVersion = (currentVersion.value || 1) + 1;
             
             // Save current version to history before updating
-            if (lastSavedContent.value && lastSavedContent.value.length > 0) {
+            // Always save version history for any content change, not just when lastSavedContent exists
+            const contentToSave = lastSavedContent.value && lastSavedContent.value.length > 0 
+              ? lastSavedContent.value 
+              : outline.value; // Use current content if no previous saved content
+              
+            if (contentToSave && contentToSave.length > 0) {
               try {
                 const { error: versionInsertError } = await supabase
                   .from('outline_versions')
                   .insert({
                     outline_id: outlineId.value,
-                    content: lastSavedContent.value,
+                    content: contentToSave,
                     version: currentVersion.value,
                     created_by: authUser.id,
-                    comment: generateChangesSummary(lastSavedContent.value, outline.value)
+                    comment: generateChangesSummary(contentToSave, outline.value)
                   });
                 
                 if (versionInsertError) {
