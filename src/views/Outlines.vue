@@ -14,13 +14,13 @@
     <!-- Breadcrumbs -->
     <div v-if="breadcrumbPath.length" class="outline-breadcrumbs">
       <template v-for="(node, idx) in breadcrumbPath" :key="node.id">
-        <span 
+        <a
           v-if="idx < breadcrumbPath.length - 1"
           class="breadcrumb-link"
-          @click="handleBreadcrumb(node, idx)"
+          :href="breadcrumbHref(node, idx)"
         >
           {{ getBreadcrumbText(node.text) }}
-        </span>
+        </a>
         <span 
           v-else
           style="font-weight: bold; color: #23272f;"
@@ -1121,6 +1121,19 @@ export default {
       router.push({ query: newQuery });
     }
 
+    // Return an href for breadcrumb anchor tags that mirrors handleBreadcrumb behavior
+    function breadcrumbHref(node, idx) {
+      const newQuery = { ...route.query };
+      const val = idx === 0 ? null : node.id;
+      if (val) {
+        newQuery.focus = val;
+      } else {
+        delete newQuery.focus;
+      }
+      // Build full path using current route path and updated query
+      return router.resolve({ path: route.path, query: newQuery }).href;
+    }
+
     function getBreadcrumbText(text) {
       return getCleanText(text) || 'Untitled';
     }
@@ -1971,6 +1984,7 @@ This prevents data loss and conflicts.`;
       // Breadcrumbs
       breadcrumbPath,
       handleBreadcrumb,
+  breadcrumbHref,
       getBreadcrumbText,
       openHistoryDialog,
       historyDialogVisible,
