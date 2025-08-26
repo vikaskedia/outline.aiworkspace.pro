@@ -143,10 +143,36 @@ export default {
       const otherText = (otherItem.text || '').trim()
       
       if (currentText !== otherText) {
+        // For complete text replacements, show as removal/addition instead of modification
+        const textSimilarity = calculateTextSimilarity(currentText, otherText)
+        
+        // If texts are completely different (less than 30% similarity), treat as remove/add
+        if (textSimilarity < 0.3) {
+          return isOldSide ? 'removed' : 'added'
+        }
+        
+        // Otherwise show as modification
         return 'modified'
       }
       
       return 'unchanged'
+    }
+    
+    function calculateTextSimilarity(text1, text2) {
+      if (!text1 && !text2) return 1.0
+      if (!text1 || !text2) return 0.0
+      
+      // Simple similarity calculation based on common words
+      const words1 = text1.toLowerCase().split(/\s+/)
+      const words2 = text2.toLowerCase().split(/\s+/)
+      
+      if (words1.length === 0 && words2.length === 0) return 1.0
+      if (words1.length === 0 || words2.length === 0) return 0.0
+      
+      const commonWords = words1.filter(word => words2.includes(word))
+      const totalWords = Math.max(words1.length, words2.length)
+      
+      return commonWords.length / totalWords
     }
     
     function calculateDiffStats() {
@@ -208,6 +234,7 @@ export default {
       oldItemsMap,
       newItemsMap,
       getDiffType,
+      calculateTextSimilarity,
       formatDate
     }
   }

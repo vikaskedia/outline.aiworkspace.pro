@@ -112,10 +112,36 @@ export default {
       const otherText = (otherItem.text || '').trim()
       
       if (currentText !== otherText) {
+        // For complete text replacements, show as removal/addition instead of modification
+        const textSimilarity = calculateTextSimilarity(currentText, otherText)
+        
+        // If texts are completely different (less than 30% similarity), treat as remove/add
+        if (textSimilarity < 0.3) {
+          return isOldSide ? 'removed' : 'added'
+        }
+        
+        // Otherwise show as modification
         return 'modified'
       }
       
       return 'unchanged'
+    }
+    
+    function calculateTextSimilarity(text1, text2) {
+      if (!text1 && !text2) return 1.0
+      if (!text1 || !text2) return 0.0
+      
+      // Simple similarity calculation based on common words
+      const words1 = text1.toLowerCase().split(/\s+/)
+      const words2 = text2.toLowerCase().split(/\s+/)
+      
+      if (words1.length === 0 && words2.length === 0) return 1.0
+      if (words1.length === 0 || words2.length === 0) return 0.0
+      
+      const commonWords = words1.filter(word => words2.includes(word))
+      const totalWords = Math.max(words1.length, words2.length)
+      
+      return commonWords.length / totalWords
     }
     
     return {
@@ -195,16 +221,25 @@ export default {
 
 /* Diff type specific styles */
 .diff-added {
-  background-color: rgba(40, 167, 69, 0.05);
+  background-color: rgba(40, 167, 69, 0.1);
   border-left: 3px solid #28a745;
   padding-left: 0.5rem;
 }
 
+.diff-added .item-text {
+  font-weight: 500;
+}
+
 .diff-removed {
-  background-color: rgba(220, 53, 69, 0.05);
+  background-color: rgba(220, 53, 69, 0.1);
   border-left: 3px solid #dc3545;
   padding-left: 0.5rem;
-  opacity: 0.7;
+  opacity: 0.8;
+}
+
+.diff-removed .item-text {
+  text-decoration: line-through;
+  color: #721c24;
 }
 
 .diff-modified {
