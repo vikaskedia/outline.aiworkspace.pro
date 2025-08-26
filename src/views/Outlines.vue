@@ -106,19 +106,56 @@
     </div>
 
     <!-- Version History Dialog -->
-    <el-dialog v-model="historyDialogVisible" title="Outline Version History" width="700px">
-      <el-table :data="versionHistory" style="width: 100%" v-loading="loadingHistory">
-        <el-table-column prop="version" label="Version" width="80" />
-        <el-table-column prop="created_at" label="Date" width="160" :formatter="(row) => formatDate(row.created_at)" />
-        <el-table-column prop="changes_summary" label="Summary" />
-        <el-table-column fixed="right" label="Actions" width="100">
-          <template #default="{ row }">
-            <el-button @click="viewVersion(row)" size="small">View</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+    <el-dialog v-model="historyDialogVisible" title="Outline Version History" width="900px">
+      <div class="history-dialog-content">
+        <!-- Version table when no comparison is active -->
+        <el-table 
+          v-if="!showDiff" 
+          :data="versionHistory" 
+          style="width: 100%" 
+          v-loading="loadingHistory"
+          @row-click="compareWithPrevious"
+          class="version-table"
+        >
+          <el-table-column prop="version" label="Version" width="80" />
+          <el-table-column prop="created_at" label="Date" width="160" :formatter="(row) => formatDate(row.created_at)" />
+          <el-table-column prop="comment" label="Summary" />
+          <el-table-column fixed="right" label="Actions" width="120">
+            <template #default="{ row }">
+              <el-button @click.stop="viewVersion(row)" size="small">View</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <!-- Diff view when comparison is active -->
+        <div v-if="showDiff" class="diff-view-container">
+          <div class="diff-header-bar">
+            <span class="diff-title">
+              Comparing v{{ selectedOldVersion }} → v{{ selectedNewVersion }}
+            </span>
+            <el-button @click="closeDiff" size="small" type="text">
+              <el-icon><Close /></el-icon>
+              Back to List
+            </el-button>
+          </div>
+          <OutlineDiff 
+            :old-version="getVersionByNumber(selectedOldVersion)"
+            :new-version="getVersionByNumber(selectedNewVersion)"
+          />
+        </div>
+      </div>
+
       <template #footer>
-        <el-button @click="historyDialogVisible = false">Close</el-button>
+        <div class="history-dialog-footer">
+          <div class="footer-info">
+            <span class="table-info">
+              {{ versionHistory.length }} version{{ versionHistory.length !== 1 ? 's' : '' }} available
+              <span v-if="versionHistory.length >= MAX_HISTORY_VERSIONS" class="limit-hint">(showing last {{ MAX_HISTORY_VERSIONS }})</span>
+              <span v-if="!showDiff" class="click-hint">• Click any version to see changes</span>
+            </span>
+          </div>
+          <el-button @click="historyDialogVisible = false">Close</el-button>
+        </div>
       </template>
     </el-dialog>
 
@@ -200,9 +237,10 @@
 import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElNotification, ElMessageBox } from 'element-plus';
-import { Clock, Refresh, Search, Back, Loading, Warning, Check } from '@element-plus/icons-vue';
+import { Clock, Refresh, Search, Back, Loading, Warning, Check, Close } from '@element-plus/icons-vue';
 import { supabase } from '../supabase';
 import OutlinePointsCt from '../components/OutlinePointsCt.vue';
+import OutlineDiff from '../components/OutlineDiff.vue';
 import { updateWorkspaceActivity } from '../utils/workspaceActivity';
 import { setOutlineTitle, getCleanText } from '../utils/page-title';
 import { useWorkspaceStore } from '../store/workspace';
@@ -226,14 +264,75 @@ function debounce(func, wait) {
   return executedFunction;
 }
 
+// Constants
+const MAX_HISTORY_VERSIONS = 50;
+
 // Generate unique render ID for this tab
 function generateRenderID() {
   return 'render_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 }
 
+// Generate a summary of changes between two outline versions
+function generateChangesSummary(oldOutline, newOutline) {
+  if (!oldOutline || !newOutline) return 'Changes made';
+  
+  const changes = [];
+  const oldItems = flattenOutlineForDiff(oldOutline);
+  const newItems = flattenOutlineForDiff(newOutline);
+  
+  // Count additions and deletions
+  const oldTexts = new Set(oldItems.map(item => item.text));
+  const newTexts = new Set(newItems.map(item => item.text));
+  
+  const added = newItems.filter(item => !oldTexts.has(item.text));
+  const removed = oldItems.filter(item => !newTexts.has(item.text));
+  
+  if (added.length > 0) {
+    changes.push(`+${added.length} item${added.length > 1 ? 's' : ''}`);
+  }
+  if (removed.length > 0) {
+    changes.push(`-${removed.length} item${removed.length > 1 ? 's' : ''}`);
+  }
+  
+  // Check for modifications
+  const modified = newItems.filter(newItem => {
+    const oldItem = oldItems.find(old => old.id === newItem.id);
+    return oldItem && oldItem.text !== newItem.text;
+  });
+  
+  if (modified.length > 0) {
+    changes.push(`~${modified.length} modified`);
+  }
+  
+  return changes.length > 0 ? changes.join(', ') : 'Minor changes';
+}
+
+// Flatten outline structure for diff comparison
+function flattenOutlineForDiff(outline) {
+  const items = [];
+  
+  function traverse(items_array) {
+    if (!Array.isArray(items_array)) return;
+    for (const item of items_array) {
+      if (item.text && item.text.trim()) {
+        items.push({
+          id: item.id,
+          text: item.text.trim()
+        });
+      }
+      if (item.children && item.children.length > 0) {
+        traverse(item.children);
+      }
+    }
+  }
+  
+  traverse(outline);
+  return items;
+}
+
 export default {
   name: 'OutlineCt',
-  components: { OutlinePointsCt, Clock, Refresh, Search, Back, Loading, Warning, Check },
+  components: { OutlinePointsCt, OutlineDiff, Clock, Refresh, Search, Back, Loading, Warning, Check, Close },
   props: {
     workspace_id: {
       type: String,
@@ -266,6 +365,8 @@ export default {
     const lastSaveTime = ref(null);
     const isAuthenticated = ref(false);
     const authCheckDone = ref(false);
+    const selectedOldVersion = ref(null);
+    const selectedNewVersion = ref(null);
     
     // Generate unique render ID for this tab/component instance
     const outlineRenderID = ref(generateRenderID());
@@ -417,6 +518,12 @@ export default {
     // Computed property to ensure version is always displayed
     const displayVersion = computed(() => {
       return currentVersion.value || 1;
+    });
+
+    // Computed property for showing diff view
+    const showDiff = computed(() => {
+      return selectedOldVersion.value && selectedNewVersion.value && 
+             selectedOldVersion.value !== selectedNewVersion.value;
     });
 
     // Default outline data
@@ -682,6 +789,28 @@ export default {
             }
 
             const nextVersion = (currentVersion.value || 1) + 1;
+            
+            // Save current version to history before updating
+            if (lastSavedContent.value && lastSavedContent.value.length > 0) {
+              try {
+                const { error: versionInsertError } = await supabase
+                  .from('outline_versions')
+                  .insert({
+                    outline_id: outlineId.value,
+                    content: lastSavedContent.value,
+                    version: currentVersion.value,
+                    created_by: authUser.id,
+                    comment: generateChangesSummary(lastSavedContent.value, outline.value)
+                  });
+                
+                if (versionInsertError) {
+                  console.warn('Failed to save version history:', versionInsertError.message);
+                }
+              } catch (versionError) {
+                console.warn('Error saving version history:', versionError);
+              }
+            }
+
             const { error: updateErr, data: updated } = await supabase
               .from('outlines')
               .update({ 
@@ -968,21 +1097,80 @@ export default {
       historyDialogVisible.value = true;
       loadingHistory.value = true;
       
-      // Mock version history
-      versionHistory.value = [
-        {
-          version: currentVersion.value,
-          created_at: new Date().toISOString(),
-          changes_summary: 'Current version'
-        },
-        {
-          version: currentVersion.value - 1,
-          created_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-          changes_summary: 'Added new items'
+      try {
+        if (!outlineId.value) {
+          versionHistory.value = [];
+          return;
         }
-      ];
-      
-      loadingHistory.value = false;
+
+        // Load version history from database (limit to recent versions)
+        const { data: versions, error: versionsError } = await supabase
+          .from('outline_versions')
+          .select('*')
+          .eq('outline_id', outlineId.value)
+          .order('version', { ascending: false })
+          .limit(MAX_HISTORY_VERSIONS);
+
+        if (versionsError) {
+          console.warn('Version history not available:', versionsError.message);
+          // Fall back to showing just current version if outline_versions table doesn't exist
+          if (versionsError.code === 'PGRST116' || versionsError.message.includes('relation') || versionsError.message.includes('does not exist')) {
+            console.log('outline_versions table not available, showing current version only');
+            const currentVersionData = {
+              id: 'current',
+              version: currentVersion.value,
+              created_at: lastSaveTime.value || new Date().toISOString(),
+              comment: 'Current version (history not available)',
+              content: outline.value,
+              created_by: userInfo.value?.id
+            };
+            versionHistory.value = [currentVersionData];
+            return;
+          }
+          
+          // For other errors, show notification
+          ElNotification({
+            title: 'Version History Limited',
+            message: 'Could not load full version history. Showing current version only.',
+            type: 'warning',
+            duration: 4000
+          });
+          
+          const currentVersionData = {
+            id: 'current',
+            version: currentVersion.value,
+            created_at: lastSaveTime.value || new Date().toISOString(),
+            comment: 'Current version',
+            content: outline.value,
+            created_by: userInfo.value?.id
+          };
+          versionHistory.value = [currentVersionData];
+          return;
+        }
+
+        // Add current version to the list
+        const currentVersionData = {
+          id: 'current',
+          version: currentVersion.value,
+          created_at: lastSaveTime.value || new Date().toISOString(),
+          comment: 'Current version',
+          content: outline.value,
+          created_by: userInfo.value?.id
+        };
+
+        versionHistory.value = [currentVersionData, ...(versions || [])];
+        
+      } catch (error) {
+        console.error('Error in openHistoryDialog:', error);
+        ElNotification({
+          title: 'Load Failed',
+          message: 'Could not load version history',
+          type: 'error'
+        });
+        versionHistory.value = [];
+      } finally {
+        loadingHistory.value = false;
+      }
     }
 
     function viewVersion(versionRow) {
@@ -997,6 +1185,33 @@ export default {
       if (!dateString) return '';
       const date = new Date(dateString);
       return date.toLocaleString();
+    }
+
+    function getVersionByNumber(versionNumber) {
+      return versionHistory.value.find(v => v.version === versionNumber) || null;
+    }
+
+    function compareWithPrevious(row) {
+      const currentIndex = versionHistory.value.findIndex(v => v.version === row.version);
+      const previousVersion = versionHistory.value[currentIndex + 1]; // Next in array (older version)
+      
+      if (!previousVersion) {
+        ElNotification({
+          title: 'No Previous Version',
+          message: 'This is the oldest version available',
+          type: 'info',
+          duration: 3000
+        });
+        return;
+      }
+      
+      selectedOldVersion.value = previousVersion.version;
+      selectedNewVersion.value = row.version;
+    }
+
+    function closeDiff() {
+      selectedOldVersion.value = null;
+      selectedNewVersion.value = null;
     }
 
     // --- Keyboard navigation logic ---
@@ -1748,7 +1963,15 @@ This prevents data loss and conflicts.`;
       isAuthenticated,
       authCheckDone,
       userInfo,
-      outlineMetadata
+      outlineMetadata,
+      // Diff functionality
+      selectedOldVersion,
+      selectedNewVersion,
+      showDiff,
+      getVersionByNumber,
+      compareWithPrevious,
+      closeDiff,
+      MAX_HISTORY_VERSIONS
     };
   }
 };
@@ -1922,6 +2145,84 @@ This prevents data loss and conflicts.`;
   margin-bottom: 1rem;
 }
 
+/* History dialog styles */
+.history-dialog-content {
+  max-height: 70vh;
+  min-height: 400px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.diff-header-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  border-bottom: 1px solid #e1e8ed;
+  background: #f8f9fa;
+}
+
+.diff-title {
+  font-weight: 600;
+  color: #1976d2;
+  font-size: 1rem;
+}
+
+.version-table {
+  flex: 1;
+  overflow: auto;
+}
+
+.version-table :deep(.el-table__row) {
+  cursor: pointer;
+}
+
+.version-table :deep(.el-table__row:hover) {
+  background-color: #f0f2f5;
+}
+
+.diff-view-container {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid #e1e8ed;
+  border-radius: 6px;
+  background: white;
+  display: flex;
+  flex-direction: column;
+}
+
+.history-dialog-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.footer-info {
+  flex: 1;
+}
+
+.diff-info {
+  font-weight: 600;
+  color: #1976d2;
+}
+
+.table-info {
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.click-hint {
+  color: #999;
+  font-style: italic;
+}
+
+.limit-hint {
+  color: #f39c12;
+  font-weight: 500;
+}
+
 @media (max-width: 768px) {
   .outline-container {
     padding: 1rem;
@@ -1938,6 +2239,12 @@ This prevents data loss and conflicts.`;
   
   .sync-status {
     justify-content: center;
+  }
+  
+  .diff-header-bar {
+    flex-direction: column;
+    gap: 0.5rem;
+    text-align: center;
   }
 }
 </style>
