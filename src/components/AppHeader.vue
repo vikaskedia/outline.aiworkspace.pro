@@ -24,10 +24,14 @@
               <el-dropdown-menu class="workspace-tree-dropdown">
                 <!-- All workspace option -->
                 <el-dropdown-item command="all-workspace">
-                  <div class="workspace-dropdown-item">
+                  <a
+                    class="workspace-dropdown-item workspace-dropdown-link"
+                    :href="'https://all-ws-dashboard.aiworkspace.pro/all-workspace/dashboard'"
+                    @click.prevent="() => { window.location.href = 'https://all-ws-dashboard.aiworkspace.pro/all-workspace/dashboard' }"
+                  >
                     <span class="workspace-icon">🌐</span>
                     <span>All workspace</span>
-                  </div>
+                  </a>
                 </el-dropdown-item>
                 <el-dropdown-item v-if="flattenedWorkspaces.length > 0" divided disabled>
                   <!-- Divider -->
@@ -35,16 +39,20 @@
                 <el-dropdown-item 
                   v-for="w in flattenedWorkspaces" 
                   :key="w.id"
-                  :command="`workspace-${w.id}`"
                 >
-                  <div class="workspace-dropdown-item" :style="{ paddingLeft: (w.level * 16) + 'px' }">
+                  <a
+                    class="workspace-dropdown-item workspace-dropdown-link"
+                    :style="{ paddingLeft: (w.level * 16) + 'px' }"
+                    :href="getWorkspaceHref(w)"
+                    @click.prevent="() => switchWorkspace(w)"
+                  >
                     <span class="workspace-icon">{{ w.children && w.children.length ? '📁' : '📄' }}</span>
                     <span>{{ w.title }}</span>
                     <el-tag v-if="w.id === currentWorkspace?.id" size="small" type="success">Current</el-tag>
-                  </div>
+                  </a>
                 </el-dropdown-item>
                 <el-dropdown-item v-if="flattenedWorkspaces.length === 0" disabled>
-                  No workspaces
+                  <span>No workspaces</span>
                 </el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -61,10 +69,14 @@
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item v-for="item in secondaryNavItems" :key="item.label" :class="{ active: item.active }">
-                  <span class="nav-link" @click="handleSecondaryNavClick(item)">
-                    {{ item.label }}
-                  </span>
-                </el-dropdown-item>
+                    <a
+                      class="nav-link"
+                      :href="getSecondaryHref(item)"
+                      @click.prevent="() => handleSecondaryNavClick(item)"
+                    >
+                      {{ item.label }}
+                    </a>
+                  </el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -412,7 +424,17 @@ export default {
             window.location.href = 'https://tasks.aiworkspace.pro'
           }
           break
-        
+
+        case 'dashboard':
+          // Redirect to dashboard.aiworkspace.pro
+          if (workspace) {
+            const dashboardUrl = `https://single-ws-dashboard.aiworkspace.pro/single-workspace/${workspace.id}/dashboard`
+            window.location.href = dashboardUrl
+          } else {
+            window.location.href = 'https://single-ws-dashboard.aiworkspace.pro'
+          }
+          break
+
         default:
           // Redirect to main app.aiworkspace.pro for all other items
           if (workspace) {
@@ -508,6 +530,30 @@ export default {
       })
     }
 
+    // Helpers to provide hrefs for anchors in dropdowns
+    const getWorkspaceHref = (w) => {
+      // Use absolute app URL so opening in new tab goes to the right workspace
+      return `https://outline.aiworkspace.pro/single-workspace/${w.id}/outlines`
+    }
+
+    const getSecondaryHref = (item) => {
+      const workspace = currentWorkspace.value
+      switch (item.key) {
+        case 'ai-portfolios':
+          return workspace ? `https://spreadsheet.aiworkspace.pro/single-workspace/${workspace.id}/ai-portfolios` : 'https://spreadsheet.aiworkspace.pro'
+        case 'canvas':
+          return workspace ? `https://canvas.aiworkspace.pro/single-workspace/${workspace.id}/canvas` : 'https://canvas.aiworkspace.pro'
+        case 'files':
+          return workspace ? `https://drive.aiworkspace.pro/single-workspace/${workspace.id}/files` : 'https://drive.aiworkspace.pro'
+        case 'tasks':
+          return workspace ? `https://tasks.aiworkspace.pro/single-workspace/${workspace.id}/tasks` : 'https://tasks.aiworkspace.pro'
+        case 'dashboard':
+          return workspace ? `https://single-ws-dashboard.aiworkspace.pro/single-workspace/${workspace.id}/dashboard` : 'https://single-ws-dashboard.aiworkspace.pro'
+        default:
+          return workspace ? `https://app.aiworkspace.pro/single-workspace/${workspace.id}/${item.key}` : `https://app.aiworkspace.pro/${item.key}`
+      }
+    }
+
     onMounted(async () => {
       await loadUserInfo()
       if (!isAuthenticated.value) return
@@ -537,6 +583,8 @@ export default {
       handleSecondaryNavClick,
       switchWorkspace,
       createNewWorkspace,
+  getWorkspaceHref,
+  getSecondaryHref,
       secondaryNavItems,
       currentSectionLabel
     }
@@ -767,6 +815,21 @@ export default {
   align-items: center;
   gap: 8px;
   width: 100%;
+}
+
+/* Ensure anchor-based dropdown items keep the app's color and hover styles (not default blue link color) */
+.workspace-dropdown-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-decoration: none;
+  color: inherit;
+  border-radius: 6px;
+}
+.workspace-dropdown-link:hover {
+  background-color: #f8f9fa;
+  color: #2c3e50;
 }
 
 .workspace-dropdown-item .workspace-icon {
