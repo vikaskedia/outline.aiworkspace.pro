@@ -181,7 +181,7 @@ export default {
       { label: 'Goals', key: 'goals' },
       { label: 'Tasks', key: 'tasks' },
       { label: 'Events', key: 'events' },
-      { label: 'Files', key: 'files' },
+      { label: 'Drive', key: 'files' },
       { label: 'Outlines', key: 'outlines' },
       { label: 'Communications', key: 'communications' },
       { label: 'Canvas', key: 'canvas' },
