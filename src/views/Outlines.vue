@@ -683,7 +683,9 @@ export default {
     }
 
     onMounted(async () => {
-      await loadOutline();
+      // If the route contains a tab id param, load that specific outline
+      const paramTabId = route.params.tab_id || route.query.tab || null;
+      await loadOutline(paramTabId);
       
       // Add localStorage cross-tab synchronization
       const handleStorageChange = (event) => {
@@ -727,7 +729,7 @@ export default {
       window.outlineStorageHandler = handleStorageChange;
     });
 
-    // Reload outline when workspace changes via navigation (same component instance)
+  // Reload outline when workspace changes via navigation (same component instance)
     watch(workspaceId, async (newVal, oldVal) => {
       if (!newVal || newVal === oldVal) return;
       
@@ -747,6 +749,15 @@ export default {
       lastSaveTime.value = null;
       firstUpdateReceived.value = false;
       await loadOutline();
+    });
+
+    // Watch for route changes so we can load a specific tab when the URL changes
+    watch(() => route.params.tab_id, async (newTabId, oldTabId) => {
+      if (!newTabId) return;
+      // Only act if the tab id actually changed
+      if (newTabId !== oldTabId && newTabId !== outlineId.value) {
+        await loadOutline(newTabId);
+      }
     });
 
     // Cleanup real-time subscription on unmount
@@ -1938,6 +1949,14 @@ This prevents data loss and conflicts.`;
     // Tab event handlers
     const handleTabChanged = async (tab) => {
       console.log('🔄 Switching to tab:', tab.id, tab.title);
+      // Update URL to include selected tab so reload preserves it
+      try {
+        const currentPath = router.currentRoute.value.path.replace(/\/tab\/.*$/, '');
+        router.replace({ path: `${currentPath}/tab/${tab.id}` }).catch(() => {});
+      } catch (e) {
+        // ignore router errors
+      }
+
       if (outlineId.value !== tab.id) {
         await loadOutline(tab.id);
       }
@@ -1946,6 +1965,10 @@ This prevents data loss and conflicts.`;
     const handleTabCreated = async (tab) => {
       console.log('➕ New tab created:', tab.id, tab.title);
       // Switch to the new tab
+      try {
+        const currentPath = router.currentRoute.value.path.replace(/\/tab\/.*$/, '');
+        router.replace({ path: `${currentPath}/tab/${tab.id}` }).catch(() => {});
+      } catch (e) {}
       await loadOutline(tab.id);
     }
 
