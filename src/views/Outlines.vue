@@ -16,6 +16,17 @@
 
   <!-- Outline content only when authenticated -->
   <div v-else class="outline-container">
+    <!-- Outline Tabs -->
+    <OutlineTabs
+      :workspace-id="workspaceId"
+      :active-tab-id="currentOutlineId"
+      :user-info="userInfo"
+      @tab-changed="handleTabChanged"
+      @tab-created="handleTabCreated"
+      @tab-deleted="handleTabDeleted"
+      @tab-updated="handleTabUpdated"
+    />
+    
     <!-- Breadcrumbs -->
     <div v-if="breadcrumbPath.length" class="outline-breadcrumbs">
       <template v-for="(node, idx) in breadcrumbPath" :key="node.id">
@@ -37,7 +48,8 @@
     </div>
 
     <!-- Header with actions and search -->
-    <div class="outline-header">
+    <div class="outline-header-wrapper">
+      <div class="outline-header">
       <div class="outline-actions">
         <!-- Search -->
         <div class="search-container">
@@ -108,6 +120,7 @@
           </el-tag>
         </span>
       </div>
+    </div>
     </div>
 
     <!-- Version History Dialog -->
@@ -204,8 +217,9 @@
     </div>
     
     <!-- Outline Content -->
-    <ul class="outline-list">
-      <OutlinePointsCt
+    <div class="outline-content">
+      <ul class="outline-list">
+        <OutlinePointsCt
         v-for="item in getFilteredOutline()"
         :key="item.id"
         :item="item"
@@ -227,13 +241,14 @@
         @outdent="handleOutdent"
         @add-sibling="handleAddSiblingRoot"
         @collapse-toggle="handleCollapseToggle"
-      />
-    </ul>
+        />
+      </ul>
 
-    <!-- Empty state (only when authenticated) -->
-    <div v-if="isAuthenticated && !outline.length" class="empty-state">
-      <p>Start building your outline...</p>
-      <el-button @click="addFirstItem" type="primary">Add First Item</el-button>
+      <!-- Empty state (only when authenticated) -->
+      <div v-if="isAuthenticated && !outline.length" class="empty-state">
+        <p>Start building your outline...</p>
+        <el-button @click="addFirstItem" type="primary">Add First Item</el-button>
+      </div>
     </div>
   </div>
 </template>
@@ -246,6 +261,7 @@ import { Clock, Refresh, Search, Back, Loading, Warning, Check, Close } from '@e
 import { supabase } from '../supabase';
 import OutlinePointsCt from '../components/OutlinePointsCt.vue';
 import OutlineDiff from '../components/OutlineDiff.vue';
+import OutlineTabs from '../components/OutlineTabs.vue';
 import { updateWorkspaceActivity } from '../utils/workspaceActivity';
 import { setOutlineTitle, getCleanText } from '../utils/page-title';
 import { useWorkspaceStore } from '../store/workspace';
@@ -344,7 +360,7 @@ function flattenOutlineForDiff(outline) {
 
 export default {
   name: 'OutlineCt',
-  components: { OutlinePointsCt, OutlineDiff, Clock, Refresh, Search, Back, Loading, Warning, Check, Close },
+  components: { OutlinePointsCt, OutlineDiff, OutlineTabs, Clock, Refresh, Search, Back, Loading, Warning, Check, Close },
   props: {
     workspace_id: {
       type: String,
@@ -360,6 +376,7 @@ export default {
     const refreshing = ref(false);
     const outline = ref([]);
     const outlineId = ref(null);
+    const currentOutlineId = computed(() => outlineId.value);
     const currentVersion = ref(1);
     const hasChanges = ref(false);
     const lastSavedContent = ref(null);
@@ -583,8 +600,8 @@ export default {
       }
     }
 
-    // Load from Supabase or localStorage
-    async function loadOutline() {
+    // Load a specific outline by ID or the first available outline
+    async function loadOutline(specificOutlineId = null) {
       authCheckDone.value = false; // reset before each load
       if (!workspaceId.value) { authCheckDone.value = true; return; }
       loadCollapsedState();
@@ -600,14 +617,21 @@ export default {
         }
         isAuthenticated.value = true;
 
-        console.log('🔍 Loading outline for workspace:', workspaceId.value);
-        const { data: existingOutline, error: outlineError } = await supabase
+        console.log('🔍 Loading outline for workspace:', workspaceId.value, 'specific ID:', specificOutlineId);
+        
+        let query = supabase
           .from('outlines')
-          .select('id, content, version, title, created_by, created_at, updated_at')
+          .select('id, content, version, title, created_by, created_at, updated_at, tab_order')
           .eq('workspace_id', workspaceId.value)
-          .order('id', { ascending: true })
-          .limit(1)
-          .maybeSingle();
+          .not('title', 'like', 'Task_%');
+        
+        if (specificOutlineId) {
+          query = query.eq('id', specificOutlineId);
+        } else {
+          query = query.order('tab_order', { ascending: true }).limit(1);
+        }
+        
+        const { data: existingOutline, error: outlineError } = await query.maybeSingle();
         if (outlineError) console.warn('Outline fetch error', outlineError.message);
         console.log('📄 Loaded outline:', existingOutline ? 'Found' : 'Not found', existingOutline?.id);
         if (existingOutline && existingOutline.content) {
@@ -624,52 +648,11 @@ export default {
             users: {}, // We could populate this with user lookups if needed
             created_by_name: userInfo.value?.id === existingOutline.created_by ? userInfo.value.name || userInfo.value.email : null
           };
-        } else {
-          console.log('📝 No existing outline found, creating default outline');
-          const initial = deepClone(defaultOutline);
-          const { data: created, error: createErr } = await supabase
-            .from('outlines')
-            .insert([{ workspace_id: workspaceId.value, title: 'Outline', content: initial }])
-            .select('id, version')
-            .single();
-          if (!createErr && created) {
-            outlineId.value = created.id;
-            outline.value = initial;
-            ensureAutoFocusProp(outline.value);
-            lastSavedContent.value = deepClone(outline.value);
-            currentVersion.value = created.version || 1;
-            
-            // Save initial version to history for new outlines
-            try {
-              const { error: versionInsertError } = await supabase
-                .from('outline_versions')
-                .insert({
-                  outline_id: created.id,
-                  content: initial,
-                  version: currentVersion.value,
-                  created_by: authUser.id,
-                  comment: 'Initial outline creation'
-                });
-              
-              if (versionInsertError) {
-                console.warn('Failed to save initial version history:', versionInsertError.message);
-              }
-            } catch (versionError) {
-              console.warn('Error saving initial version history:', versionError);
-            }
-            
-            // Store metadata for new outline
-            currentOutlineData.value = {
-              created_by: authUser.id,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-              users: {},
-              created_by_name: userInfo.value.name || userInfo.value.email
-            };
-          } else if (createErr) {
-            console.error('Create outline error', createErr.message);
-            outline.value = deepClone(defaultOutline); ensureAutoFocusProp(outline.value);
-          }
+        } else if (!specificOutlineId) {
+          console.log('📝 No existing outline found, tabs component will create default outline');
+          // Don't create here, let the OutlineTabs component handle initial creation
+          authCheckDone.value = true;
+          return;
         }
       } catch (err) {
         console.error('Supabase outline load failed', err);
@@ -1952,9 +1935,38 @@ This prevents data loss and conflicts.`;
         });
     }
 
+    // Tab event handlers
+    const handleTabChanged = async (tab) => {
+      console.log('🔄 Switching to tab:', tab.id, tab.title);
+      if (outlineId.value !== tab.id) {
+        await loadOutline(tab.id);
+      }
+    }
+
+    const handleTabCreated = async (tab) => {
+      console.log('➕ New tab created:', tab.id, tab.title);
+      // Switch to the new tab
+      await loadOutline(tab.id);
+    }
+
+    const handleTabDeleted = (tab) => {
+      console.log('🗑️ Tab deleted:', tab.id, tab.title);
+      // If this was the current tab, loadOutline will be called by the tabs component
+      // when it switches to another tab
+    }
+
+    const handleTabUpdated = (tab) => {
+      console.log('✏️ Tab updated:', tab.id, tab.title);
+      // Update page title if this is the current tab
+      if (outlineId.value === tab.id) {
+        updatePageTitle();
+      }
+    }
+
     return { 
       workspaceId,
       outlineId,
+      currentOutlineId,
       // expose icons to template for :icon / :prefix-icon bindings
       Search,
       Refresh,
@@ -2022,7 +2034,12 @@ This prevents data loss and conflicts.`;
       getVersionByNumber,
       compareWithPrevious,
       closeDiff,
-      MAX_HISTORY_VERSIONS
+      MAX_HISTORY_VERSIONS,
+      // Tab handlers
+      handleTabChanged,
+      handleTabCreated,
+      handleTabDeleted,
+      handleTabUpdated
     };
   }
 };
@@ -2052,11 +2069,16 @@ This prevents data loss and conflicts.`;
 .outline-container {
   background: white;
   border-radius: 8px;
-  padding: 2rem;
+  padding: 0;
   min-height: 200px;
   max-width: 1200px;
-  margin: 2rem auto;
+  margin: 0.75rem auto;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.outline-header-wrapper {
+  padding: 1rem 2rem 0 2rem;
 }
 
 .outline-header {
@@ -2121,6 +2143,7 @@ This prevents data loss and conflicts.`;
   margin-bottom: 1rem;
   font-size: 0.95rem;
   color: #888;
+  padding: 0 2rem;
 }
 
 .breadcrumb-link {
@@ -2161,7 +2184,7 @@ This prevents data loss and conflicts.`;
   background: #f8f9fa;
   border: 1px solid #e9ecef;
   border-radius: 6px;
-  margin-bottom: 16px;
+  margin: 0 2rem 16px 2rem;
   font-size: 0.9em;
 }
 
@@ -2276,7 +2299,7 @@ This prevents data loss and conflicts.`;
 
 @media (max-width: 768px) {
   .outline-container {
-    padding: 1rem;
+    padding: 0.75rem;
   }
   
   .outline-header {

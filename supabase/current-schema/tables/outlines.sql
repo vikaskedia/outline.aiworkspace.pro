@@ -8,7 +8,9 @@ CREATE TABLE outlines (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     version integer DEFAULT 1 NOT NULL,
-    render_id text
+    render_id text,
+    tab_order integer DEFAULT 0 NOT NULL,
+    is_default boolean DEFAULT false NOT NULL
 );
 
 -- Create outline_versions table for history
@@ -26,6 +28,7 @@ CREATE TABLE outline_versions (
 CREATE INDEX outlines_workspace_id_idx ON outlines(workspace_id);
 CREATE INDEX outlines_created_by_idx ON outlines(created_by);
 CREATE INDEX outlines_render_id_idx ON outlines(render_id);
+CREATE INDEX outlines_tab_order_idx ON outlines(workspace_id, tab_order);
 CREATE INDEX outline_versions_outline_id_idx ON outline_versions(outline_id);
 
 -- Enable RLS
