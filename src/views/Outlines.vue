@@ -3,6 +3,11 @@
   <div v-if="!isAuthenticated && authCheckDone" class="not-auth-message">
     <h2>Sign in required</h2>
     <p>Please log in to view and edit this workspace outline.</p>
+    <p>
+      <a href="https://login.aiworkspace.pro" rel="noopener" class="login-link">
+        Sign in at login.aiworkspace.pro
+      </a>
+    </p>
   </div>
   <div v-else-if="!authCheckDone" class="not-auth-message">
     <h2>Loading...</h2>
