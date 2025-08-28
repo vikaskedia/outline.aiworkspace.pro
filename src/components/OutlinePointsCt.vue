@@ -983,9 +983,19 @@ export default {
     const handlePaste = async (e) => {
       const items = e.clipboardData?.items || [];
       for (let item of items) {
-        if (item.type.startsWith('image/')) {
+        if (item.type && item.type.startsWith('image/')) {
           const file = item.getAsFile();
-          if (file) await processImageFile(file); // now uploads to Gitea
+          if (file) {
+            try {
+              // Prevent default browser handling when we handle an image
+              if (e && typeof e.preventDefault === 'function') {
+                e.preventDefault()
+                e.stopPropagation()
+              }
+            } catch (_) {}
+            await processImageFile(file); // now uploads to Gitea
+            return
+          }
         }
       }
     };
@@ -1177,6 +1187,31 @@ export default {
       selectionTooltipVisible.value = false
     }
 
+    // Handle paste at window level for cases when textarea isn't focused
+    const globalPasteHandler = async (e) => {
+      try {
+        const active = document.activeElement
+        const tag = active && active.tagName && active.tagName.toLowerCase()
+        const isEditable = tag === 'textarea' || tag === 'input' || (active && active.isContentEditable)
+        // If user is focused in an input/textarea/contenteditable, let the element handle paste
+        if (isEditable) return
+
+        const items = e.clipboardData?.items || []
+        for (let item of items) {
+          if (item.type && item.type.startsWith('image/')) {
+            const file = item.getAsFile()
+            if (file) {
+              try { e.preventDefault(); e.stopPropagation(); } catch (_) {}
+              await processImageFile(file)
+              return
+            }
+          }
+        }
+      } catch (err) {
+        // swallow
+      }
+    }
+
     const handleSelection = () => {
       if (!editing.value) return
       if (!textarea.value) return
@@ -1207,11 +1242,13 @@ export default {
         try { comments.value = JSON.parse(JSON.stringify(props.item.comments)); } catch { comments.value = [...props.item.comments]; }
       }
       window.addEventListener('click', globalClickHandler)
+  window.addEventListener('paste', globalPasteHandler)
       window.addEventListener('scroll', onWindowScroll, true)
     })
 
     onBeforeUnmount(() => {
       window.removeEventListener('click', globalClickHandler)
+  window.removeEventListener('paste', globalPasteHandler)
       window.removeEventListener('scroll', onWindowScroll, true)
     })
 
