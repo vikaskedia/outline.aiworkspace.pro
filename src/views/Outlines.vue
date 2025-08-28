@@ -219,9 +219,9 @@
     <!-- Outline Content -->
     <div class="outline-content">
       <ul class="outline-list">
-        <OutlinePointsCt
-        v-for="item in getFilteredOutline()"
-        :key="item.id"
+  <OutlinePointsCt
+  v-for="item in getFilteredOutline()"
+  :key="`${item.id}_${syncCounter}`"
         :item="item"
         :readonly="false"
         :auto-focus="item.autoFocus"
@@ -389,6 +389,9 @@ export default {
     const realtimeSubscription = ref(null);
     const collapsedNodes = ref(new Set());
     const firstUpdateReceived = ref(false);
+  const reconnectAttempts = ref(0);
+  const reconnectTimer = ref(null);
+  const syncCounter = ref(0);
     const searchQuery = ref('');
     const searchStats = ref({ matches: 0, items: 0 });
     const lastSaveTime = ref(null);
@@ -718,7 +721,12 @@ export default {
             // Only update if we don't have unsaved changes
             if (!hasChanges.value) {
               console.log('✅ Applying cross-tab outline update');
-              outline.value = newOutlineData;
+              // Mutate existing reactive array in-place
+              if (Array.isArray(newOutlineData)) {
+                outline.value.splice(0, outline.value.length, ...newOutlineData);
+              } else {
+                outline.value = newOutlineData;
+              }
               ensureAutoFocusProp(outline.value, true);
 
               // Validate focus after cross-tab update
@@ -752,9 +760,15 @@ export default {
       
       // Cleanup existing subscription
       if (realtimeSubscription.value) {
-        realtimeSubscription.value.unsubscribe();
+        try { realtimeSubscription.value.unsubscribe(); } catch (e) {}
         realtimeSubscription.value = null;
       }
+      // Clear any scheduled reconnect
+      if (reconnectTimer.value) {
+        clearTimeout(reconnectTimer.value);
+        reconnectTimer.value = null;
+      }
+      reconnectAttempts.value = 0;
       
       // Reset state before loading new workspace outline
       outline.value = [];
@@ -780,10 +794,16 @@ export default {
     // Cleanup real-time subscription on unmount
     onUnmounted(() => {
       if (realtimeSubscription.value) {
-        realtimeSubscription.value.unsubscribe();
+        try { realtimeSubscription.value.unsubscribe(); } catch (e) {}
         realtimeSubscription.value = null;
       }
-      
+      // Clear any scheduled reconnect to avoid background retries
+      if (reconnectTimer.value) {
+        clearTimeout(reconnectTimer.value);
+        reconnectTimer.value = null;
+      }
+      reconnectAttempts.value = 0;
+
       // Cleanup localStorage event listener
       if (window.outlineStorageHandler) {
         window.removeEventListener('storage', window.outlineStorageHandler);
@@ -1791,25 +1811,38 @@ This prevents data loss and conflicts.`;
                         await nextTick(() => {
                           // Clear autoFocus properties from synced content to prevent conflicts
                           ensureAutoFocusProp(freshContent, true);
-                          outline.value = freshContent;
+                          // Mutate existing reactive array in-place to be robust for downstream references
+                          if (Array.isArray(freshContent)) {
+                            outline.value.splice(0, outline.value.length, ...freshContent);
+                          } else {
+                            outline.value = freshContent;
+                          }
                           currentVersion.value = newVersion;
                           lastSavedContent.value = JSON.parse(JSON.stringify(freshContent));
                           hasChanges.value = false;
-                          
+
                           // Validate focus after sync update
                           validateAndRestoreFocus();
                         });
+                                        console.log('✅ Applied remote update (no local changes) — outline length:', outline.value.length, 'first:', outline.value[0]?.text?.slice(0,50));
+                                        // Force child components to remount so edits are reflected
+                                        try { syncCounter.value++; } catch (e) {}
                       } catch (updateError) {
                         console.warn('⚠️ Error updating local state, applying manually:', updateError);
                         // Fallback to direct assignment if nextTick fails
                         ensureAutoFocusProp(freshContent, true);
-                        outline.value = freshContent;
+                        if (Array.isArray(freshContent)) {
+                          outline.value.splice(0, outline.value.length, ...freshContent);
+                        } else {
+                          outline.value = freshContent;
+                        }
                         currentVersion.value = newVersion;
                         lastSavedContent.value = JSON.parse(JSON.stringify(freshContent));
                         hasChanges.value = false;
-                        
+
                         // Validate focus after sync update
                         validateAndRestoreFocus();
+                        console.log('✅ Applied remote update (fallback) — outline length:', outline.value.length, 'first:', outline.value[0]?.text?.slice(0,50));
                       }
 
                       // Update localStorage (and mark which active tab wrote it)
@@ -1868,26 +1901,38 @@ This prevents data loss and conflicts.`;
                           await nextTick(() => {
                             const syncedContent = JSON.parse(JSON.stringify(newContent));
                             ensureAutoFocusProp(syncedContent, true);
-                            outline.value = syncedContent;
+                            if (Array.isArray(syncedContent)) {
+                              outline.value.splice(0, outline.value.length, ...syncedContent);
+                            } else {
+                              outline.value = syncedContent;
+                            }
                             currentVersion.value = newVersion;
                             lastSavedContent.value = JSON.parse(JSON.stringify(newContent));
                             hasChanges.value = false;
-                            
+
                             // Validate focus after sync update
                             validateAndRestoreFocus();
                           });
+                          console.log('✅ Synchronized content applied — outline length:', outline.value.length, 'first:', outline.value[0]?.text?.slice(0,50));
+                          // Force child components to remount so edits are reflected
+                          try { syncCounter.value++; } catch (e) {}
                         } catch (syncUpdateError) {
                           console.warn('⚠️ Error updating state during sync, applying manually:', syncUpdateError);
                           // Fallback to direct assignment if nextTick fails
                           const syncedContent = JSON.parse(JSON.stringify(newContent));
                           ensureAutoFocusProp(syncedContent, true);
-                          outline.value = syncedContent;
+                          if (Array.isArray(syncedContent)) {
+                            outline.value.splice(0, outline.value.length, ...syncedContent);
+                          } else {
+                            outline.value = syncedContent;
+                          }
                           currentVersion.value = newVersion;
                           lastSavedContent.value = JSON.parse(JSON.stringify(newContent));
                           hasChanges.value = false;
-                          
+
                           // Validate focus after sync update
                           validateAndRestoreFocus();
+                          console.log('✅ Synchronized content applied (fallback) — outline length:', outline.value.length, 'first:', outline.value[0]?.text?.slice(0,50));
                         }
 
                         // Update localStorage (and mark sender tab)
@@ -1976,17 +2021,32 @@ This prevents data loss and conflicts.`;
         )
         .subscribe((status) => {
           console.log('📡 Subscription status:', status);
-          
+
           if (status === 'SUBSCRIBED') {
             console.log('✅ Successfully subscribed to outline changes');
+            // Reset reconnect attempts when healthy
+            reconnectAttempts.value = 0;
+            if (reconnectTimer.value) {
+              clearTimeout(reconnectTimer.value);
+              reconnectTimer.value = null;
+            }
           } else if (status === 'CLOSED') {
-            console.log('❌ Subscription closed - attempting to reconnect...');
-            // Retry subscription after a delay
-            setTimeout(() => {
-              if (outlineId.value && workspaceId.value) {
-                subscribeToChanges();
-              }
-            }, 2000);
+            console.log('❌ Subscription closed - scheduling reconnect with backoff...');
+            // Schedule reconnect with exponential backoff, avoid scheduling multiple timers
+            if (!reconnectTimer.value) {
+              const attempt = reconnectAttempts.value || 0;
+              const delay = Math.min(30000, 1000 * Math.pow(2, attempt)); // cap at 30s
+              reconnectAttempts.value = attempt + 1;
+              reconnectTimer.value = setTimeout(() => {
+                reconnectTimer.value = null;
+                if (outlineId.value && workspaceId.value) {
+                  subscribeToChanges();
+                }
+              }, delay);
+              console.log(`⏱️ Reconnect scheduled in ${delay}ms (attempt ${reconnectAttempts.value})`);
+            } else {
+              console.log('⏳ Reconnect already scheduled, skipping duplicate schedule');
+            }
           } else {
             console.log('📡 Subscription status changed:', status);
           }
@@ -2049,6 +2109,7 @@ This prevents data loss and conflicts.`;
       saving,
       refreshing,
       hasChanges,
+  syncCounter,
       outlineRenderID,
       displayVersion,
       lastSaveTime,
