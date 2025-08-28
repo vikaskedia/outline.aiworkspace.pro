@@ -452,7 +452,9 @@ export default {
     const updatePageTitle = () => {
       const focusedNode = focusedId.value ? findItemById(outline.value, focusedId.value) : null;
       const focusedText = focusedNode ? getCleanText(focusedNode.text) : undefined;
-      setOutlineTitle(focusedText, workspaceName.value);
+  // Pass active tab name (outline title) when available to produce the full multi-part title
+  const activeTabName = currentOutlineData.value?.title || null;
+  setOutlineTitle(focusedText, workspaceName.value, activeTabName);
     };
     
     let refreshInterval = null;
@@ -645,6 +647,7 @@ export default {
           currentVersion.value = existingOutline.version || 1;
           // Store metadata
           currentOutlineData.value = {
+            title: existingOutline.title,
             created_by: existingOutline.created_by,
             created_at: existingOutline.created_at,
             updated_at: existingOutline.updated_at,
@@ -2066,6 +2069,12 @@ This prevents data loss and conflicts.`;
 
       if (outlineId.value !== tab.id) {
         await loadOutline(tab.id);
+      } else {
+        // Update active tab title if same id but tab meta might have changed
+        if (tab && tab.title) {
+          currentOutlineData.value = { ...(currentOutlineData.value || {}), title: tab.title };
+          updatePageTitle();
+        }
       }
     }
 
@@ -2077,6 +2086,11 @@ This prevents data loss and conflicts.`;
         router.replace({ path: `${currentPath}/tab/${tab.id}` }).catch(() => {});
       } catch (e) {}
       await loadOutline(tab.id);
+      // Ensure title includes new tab name
+      if (tab && tab.title) {
+        currentOutlineData.value = { ...(currentOutlineData.value || {}), title: tab.title };
+        updatePageTitle();
+      }
     }
 
     const handleTabDeleted = (tab) => {
@@ -2089,6 +2103,10 @@ This prevents data loss and conflicts.`;
       console.log('✏️ Tab updated:', tab.id, tab.title);
       // Update page title if this is the current tab
       if (outlineId.value === tab.id) {
+        // Keep currentOutlineData.title in sync
+        if (tab && tab.title) {
+          currentOutlineData.value = { ...(currentOutlineData.value || {}), title: tab.title };
+        }
         updatePageTitle();
       }
     }
