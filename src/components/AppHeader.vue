@@ -547,9 +547,12 @@ export default {
           return workspace ? `https://drive.aiworkspace.pro/single-workspace/${workspace.id}/files` : 'https://drive.aiworkspace.pro'
         case 'tasks':
           return workspace ? `https://tasks.aiworkspace.pro/single-workspace/${workspace.id}/tasks` : 'https://tasks.aiworkspace.pro'
+        case 'outlines':
+          return workspace ? `https://outline.aiworkspace.pro/single-workspace/${workspace.id}/outlines` : 'https://outline.aiworkspace.pro'
         case 'dashboard':
           return workspace ? `https://single-ws-dashboard.aiworkspace.pro/single-workspace/${workspace.id}/dashboard` : 'https://single-ws-dashboard.aiworkspace.pro'
         default:
+          console.log('getSecondaryHref', item.key, workspace)
           return workspace ? `https://app.aiworkspace.pro/single-workspace/${workspace.id}/${item.key}` : `https://app.aiworkspace.pro/${item.key}`
       }
     }
