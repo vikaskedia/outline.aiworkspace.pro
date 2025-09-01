@@ -246,7 +246,57 @@ export default {
           workspaceStore.loadPersistedData()
           return
         }
-      } catch (e) { console.error('Error getting Supabase session:', e) }
+        
+        // If no active session, try to restore from cookies
+        console.log('[auth][header] No active session, attempting to restore from cookies...')
+        const { restoreSessionWithRetry } = await import('../plugins/crossSubdomainAuth')
+        const restoreResult = await restoreSessionWithRetry()
+        
+        if (restoreResult.success && restoreResult.session) {
+          console.log('[auth][header] Session restored successfully')
+          const user = restoreResult.session.user
+          const userData = {
+            id: user.id,
+            name: user.user_metadata?.name || user.user_metadata?.user_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
+            email: user.email,
+            avatar: user.user_metadata?.avatar_url || null,
+            initials: (user.user_metadata?.name || user.email?.split('@')[0] || 'U').split(' ').map(n => n[0]).join('').toUpperCase().substring(0,2)
+          }
+          userInfo.value = userData
+          workspaceStore.setUser(userData)
+          isAuthenticated.value = true
+          workspaceStore.loadPersistedData()
+          return
+        } else {
+          console.log('[auth][header] Failed to restore session:', restoreResult.error)
+        }
+        
+      } catch (e) { 
+        console.error('Error getting Supabase session:', e)
+        // Try to restore session even if getSession fails
+        try {
+          const { restoreSessionWithRetry } = await import('../plugins/crossSubdomainAuth')
+          const restoreResult = await restoreSessionWithRetry()
+          if (restoreResult.success && restoreResult.session) {
+            console.log('[auth][header] Session restored after error')
+            const user = restoreResult.session.user
+            const userData = {
+              id: user.id,
+              name: user.user_metadata?.name || user.user_metadata?.user_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
+              email: user.email,
+              avatar: user.user_metadata?.avatar_url || null,
+              initials: (user.user_metadata?.name || user.email?.split('@')[0] || 'U').split(' ').map(n => n[0]).join('').toUpperCase().substring(0,2)
+            }
+            userInfo.value = userData
+            workspaceStore.setUser(userData)
+            isAuthenticated.value = true
+            workspaceStore.loadPersistedData()
+            return
+          }
+        } catch (restoreError) {
+          console.error('Error restoring session:', restoreError)
+        }
+      }
 
       // Second check login cookies
       const getCookie = (name) => { const value = `; ${document.cookie}`; const parts = value.split(`; ${name}=`); if (parts.length === 2) return parts.pop().split(';').shift(); return null }

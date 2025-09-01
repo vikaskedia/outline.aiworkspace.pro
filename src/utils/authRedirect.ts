@@ -16,7 +16,7 @@ function cookieSummary(names: string[]) {
   return filtered
 }
 
-export function setSessionCookie(name: string, value: string, maxAgeSec = 60 * 60 * 24 * 7) {
+export function setSessionCookie(name: string, value: string, maxAgeSec = 60 * 60 * 24 * 365) {
   const host = location.hostname
   const isLocal = isLocalHost(host)
   if (isLocal) {
@@ -67,7 +67,7 @@ export function ensureCrossSubdomainCookies(names: string[]) {
   names.forEach(n => {
     const v = getCookie(n)
     if (v) {
-      setSessionCookie(n, v) // will log itself
+      setSessionCookie(n, v, 60 * 60 * 24 * 365) // Use 1 year expiration instead of default 7 days
     } else {
       console.log('[auth][cookie][promote] missing', n)
     }

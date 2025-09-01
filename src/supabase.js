@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { ensureCrossSubdomainCookies, ACCESS_COOKIE, REFRESH_COOKIE } from './utils/authRedirect'
+import { setupAuthStateListener } from './plugins/crossSubdomainAuth'
 
 if (typeof window !== 'undefined') {
   try {
@@ -13,10 +14,29 @@ if (typeof window !== 'undefined') {
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project-url.supabase.co'
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'your-anon-key'
 
-export const supabase = createClient(supabaseUrl, supabaseKey)
+export const supabase = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    // Enable automatic token refresh
+    autoRefreshToken: true,
+    // Persist session in localStorage
+    persistSession: true,
+    // Detect session in URL (for OAuth callbacks)
+    detectSessionInUrl: true
+  }
+})
+
+// Set up auth state listener for automatic token refresh
+if (typeof window !== 'undefined') {
+  setupAuthStateListener()
+}
 
 // Log configuration status (remove in production)
-console.log('Supabase Configuration:')
+console.log('Supabase Configuration:', {
+  url: supabaseUrl,
+  hasKey: !!supabaseKey,
+  autoRefreshToken: true,
+  persistSession: true
+})
 console.log('URL:', supabaseUrl.replace(/https:\/\/(.+)\.supabase\.co/, 'https://*****.supabase.co'))
 console.log('Key configured:', !!supabaseKey && !supabaseKey.includes('your-anon-key'))
 console.log('Environment mode:', import.meta.env.MODE)
