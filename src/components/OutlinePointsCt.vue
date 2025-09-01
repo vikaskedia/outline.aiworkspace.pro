@@ -516,6 +516,11 @@ export default {
           immediate: true
         }
         
+        // Preserve fileUrl if it exists (important for image uploads)
+        if (props.item.fileUrl) {
+          updatePayload.fileUrl = props.item.fileUrl
+        }
+        
         // Add editor info if we have current user info
         if (props.userInfo?.id) {
           updatePayload.updated_by = props.userInfo.id
@@ -533,6 +538,11 @@ export default {
         id: props.item.id,
         text: editText.value
         // Removed immediate: true to use debounced saving (1 second after stopping typing)
+      }
+      
+      // Preserve fileUrl if it exists (important for image uploads)
+      if (props.item.fileUrl) {
+        updatePayload.fileUrl = props.item.fileUrl
       }
       
       // Add editor info if we have current user info
@@ -704,11 +714,14 @@ export default {
       ElMessage.info('Uploading image...')
       const giteaResult = await uploadImageToGitea(file)
       if (giteaResult.success) {
+        // Use a more user-friendly filename for display
+        const displayName = file.name || giteaResult.filename
         const updatePayload = { 
           id: props.item.id, 
-          text: giteaResult.filename, 
+          text: displayName, 
           fileUrl: giteaResult.url, 
-          immediate: true 
+          immediate: true,
+          isImageUpload: true // Add flag to identify image uploads
         }
         
         // Add editor info if we have current user info
@@ -717,6 +730,7 @@ export default {
           updatePayload.updated_by_name = props.userInfo.name || props.userInfo.email
         }
         
+        console.log('🖼️ Image upload successful, emitting update:', updatePayload)
         emit('update', updatePayload)
         ElMessage.success('Image uploaded')
         return
@@ -726,12 +740,13 @@ export default {
           const reader = new FileReader()
           reader.onload = () => {
             const ext = (file.name.split('.').pop() || 'png').toLowerCase()
-            const fileName = `pasted-image-${Date.now()}.${ext}`
+            const fileName = file.name || `pasted-image-${Date.now()}.${ext}`
             const updatePayload = { 
               id: props.item.id, 
               text: fileName, 
               fileUrl: reader.result, 
-              immediate: true 
+              immediate: true,
+              isImageUpload: true // Add flag to identify image uploads
             }
             
             // Add editor info if we have current user info
@@ -1247,8 +1262,13 @@ export default {
     })
 
     onBeforeUnmount(() => {
+      // Ensure any pending edits are saved before unmounting
+      if (editing.value) {
+        finishEdit()
+      }
+      
       window.removeEventListener('click', globalClickHandler)
-  window.removeEventListener('paste', globalPasteHandler)
+      window.removeEventListener('paste', globalPasteHandler)
       window.removeEventListener('scroll', onWindowScroll, true)
     })
 

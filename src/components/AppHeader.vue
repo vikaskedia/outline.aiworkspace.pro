@@ -552,7 +552,7 @@ export default {
         case 'dashboard':
           return workspace ? `https://single-ws-dashboard.aiworkspace.pro/single-workspace/${workspace.id}/dashboard` : 'https://single-ws-dashboard.aiworkspace.pro'
         default:
-          console.log('getSecondaryHref', item.key, workspace)
+          //console.log('getSecondaryHref', item.key, workspace)
           return workspace ? `https://app.aiworkspace.pro/single-workspace/${workspace.id}/${item.key}` : `https://app.aiworkspace.pro/${item.key}`
       }
     }

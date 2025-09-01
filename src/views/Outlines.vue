@@ -605,6 +605,26 @@ export default {
       }
     }
 
+    // Helper to preserve image filenames when syncing
+    function preserveImageFilenames(items) {
+      for (const item of items) {
+        // If item has fileUrl but empty text, extract filename from fileUrl
+        if (item.fileUrl && (!item.text || item.text.trim() === '')) {
+          const url = item.fileUrl;
+          let filename = '';
+          if (url.includes('/')) {
+            filename = url.split('/').pop() || 'image.png';
+          } else {
+            filename = 'image.png';
+          }
+          item.text = filename;
+        }
+        if (item.children) {
+          preserveImageFilenames(item.children);
+        }
+      }
+    }
+
     // Load a specific outline by ID or the first available outline
     async function loadOutline(specificOutlineId = null) {
       authCheckDone.value = false; // reset before each load
@@ -643,6 +663,10 @@ export default {
           outlineId.value = existingOutline.id;
           outline.value = Array.isArray(existingOutline.content) ? existingOutline.content : [];
           ensureAutoFocusProp(outline.value);
+          
+          // Preserve image filenames when loading from database
+          preserveImageFilenames(outline.value);
+          
           lastSavedContent.value = deepClone(outline.value);
           currentVersion.value = existingOutline.version || 1;
           // Store metadata
@@ -901,12 +925,17 @@ export default {
                 render_id: outlineRenderID.value // Add render ID to track which tab made the change
               })
               .eq('id', outlineId.value)
-              .select('version')
+              .select('version, render_id')
               .single();
             if (updateErr) {
               console.error('Outline update error', updateErr.message);
             } else {
               currentVersion.value = updated?.version || nextVersion;
+              console.log('✅ Outline saved successfully:', {
+                version: updated?.version,
+                renderId: updated?.render_id,
+                hasFileUrls: JSON.stringify(outline.value).includes('fileUrl')
+              });
             }
           }
         }
@@ -924,7 +953,22 @@ export default {
     function updateTextById(items, id, text, extra = {}) {
       for (const item of items) {
         if (item.id === id) {
-          if (text !== undefined) item.text = text;
+          if (text !== undefined) {
+            // If we have a fileUrl and the text is being set to empty, preserve the filename
+            if (extra.fileUrl && (!text || text.trim() === '')) {
+              // Extract filename from fileUrl or use a default
+              const url = extra.fileUrl;
+              let filename = '';
+              if (url.includes('/')) {
+                filename = url.split('/').pop() || 'image.png';
+              } else {
+                filename = 'image.png';
+              }
+              item.text = filename;
+            } else {
+              item.text = text;
+            }
+          }
           if (extra.comments) item.comments = extra.comments;
           if (Object.prototype.hasOwnProperty.call(extra, 'fileUrl')) item.fileUrl = extra.fileUrl; // persist image data URL
           if (extra.updated_by) item.updated_by = extra.updated_by;
@@ -987,17 +1031,17 @@ export default {
       return null;
     }
 
-    function onOutlineUpdate({ id, text, comments, fileUrl, immediate, updated_by, updated_by_name }) {
+    function onOutlineUpdate({ id, text, comments, fileUrl, immediate, updated_by, updated_by_name, isImageUpload }) {
       updateTextById(outline.value, id, text, { comments, fileUrl, updated_by, updated_by_name });
       hasChanges.value = checkForChanges(outline.value);
       
-      // If immediate save is requested (e.g., during text changes), save immediately
+      // If immediate save is requested (e.g., during text changes or image uploads), save immediately
       if (immediate && hasChanges.value && !saving.value) {
         // Cancel any pending debounced save and save immediately
         if (debouncedSave && debouncedSave.cancel) {
           debouncedSave.cancel();
         }
-        console.log('Immediate save triggered from onOutlineUpdate');
+        console.log('Immediate save triggered from onOutlineUpdate', isImageUpload ? '(image upload)' : '(text change)');
         saveOutline();
       } else {
         // Otherwise, use debounced save
@@ -1723,7 +1767,8 @@ This prevents data loss and conflicts.`;
               currentLocalVersion: currentVersion.value,
               updateRenderID: payload.new?.render_id,
               ourRenderID: outlineRenderID.value,
-              isSaving: saving.value
+              isSaving: saving.value,
+              hasFileUrls: JSON.stringify(payload.new?.content).includes('fileUrl')
             });
             
             // Check if this update came from our own tab
@@ -1746,8 +1791,8 @@ This prevents data loss and conflicts.`;
               return;
             }
             
-            // If we just saved recently (within 2 seconds), skip processing
-            if (lastSaveTime.value && (Date.now() - new Date(lastSaveTime.value).getTime()) < 2000) {
+            // If we just saved recently (within 3 seconds), skip processing to avoid race conditions
+            if (lastSaveTime.value && (Date.now() - new Date(lastSaveTime.value).getTime()) < 3000) {
               console.log('⏭️ Skipping update - recent save detected (avoiding post-save conflict)');
               // Still update version tracking if the received version is higher
               if (updateVersion && updateVersion > currentVersion.value) {
@@ -1814,6 +1859,10 @@ This prevents data loss and conflicts.`;
                         await nextTick(() => {
                           // Clear autoFocus properties from synced content to prevent conflicts
                           ensureAutoFocusProp(freshContent, true);
+                          
+                          // Preserve image filenames in local state before syncing
+                          preserveImageFilenames(freshContent);
+                          
                           // Mutate existing reactive array in-place to be robust for downstream references
                           if (Array.isArray(freshContent)) {
                             outline.value.splice(0, outline.value.length, ...freshContent);
@@ -1834,6 +1883,10 @@ This prevents data loss and conflicts.`;
                         console.warn('⚠️ Error updating local state, applying manually:', updateError);
                         // Fallback to direct assignment if nextTick fails
                         ensureAutoFocusProp(freshContent, true);
+                        
+                        // Preserve image filenames in fresh content
+                        preserveImageFilenames(freshContent);
+                        
                         if (Array.isArray(freshContent)) {
                           outline.value.splice(0, outline.value.length, ...freshContent);
                         } else {
@@ -1904,6 +1957,10 @@ This prevents data loss and conflicts.`;
                           await nextTick(() => {
                             const syncedContent = JSON.parse(JSON.stringify(newContent));
                             ensureAutoFocusProp(syncedContent, true);
+                            
+                            // Preserve image filenames in synced content
+                            preserveImageFilenames(syncedContent);
+                            
                             if (Array.isArray(syncedContent)) {
                               outline.value.splice(0, outline.value.length, ...syncedContent);
                             } else {
@@ -1924,6 +1981,10 @@ This prevents data loss and conflicts.`;
                           // Fallback to direct assignment if nextTick fails
                           const syncedContent = JSON.parse(JSON.stringify(newContent));
                           ensureAutoFocusProp(syncedContent, true);
+                          
+                          // Preserve image filenames in synced content
+                          preserveImageFilenames(syncedContent);
+                          
                           if (Array.isArray(syncedContent)) {
                             outline.value.splice(0, outline.value.length, ...syncedContent);
                           } else {
