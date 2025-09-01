@@ -197,11 +197,11 @@ export default {
       { label: 'Outlines', key: 'outlines' },
       { label: 'Communications', key: 'communications' },
       { label: 'Canvas', key: 'canvas' },
-      { label: 'AI Phone', key: 'ai-phone' },
-      { label: 'AI Intake', key: 'ai-intake' },
-      { label: 'AI Fax', key: 'ai-fax' },
+      { label: 'AI Phone', key: 'ai_phone' },
+      { label: 'AI Intake', key: 'ai_intake' },
+      { label: 'AI Fax', key: 'ai_fax' },
       { label: 'AI Portfolios', key: 'ai-portfolios' },
-      { label: 'AI Fund Analyst', key: 'ai-fund-analyst' },
+      { label: 'AI Fund Analyst', key: 'ai_fund_analyst' },
       { label: 'Contacts', key: 'contacts' },
       { label: 'Settings', key: 'settings' }
     ])
