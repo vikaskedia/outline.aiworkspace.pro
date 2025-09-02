@@ -1383,16 +1383,21 @@ export default {
     // --- Indent/Outdent logic ---
     // Helper to get parent array and index for a node id
     function findParentArrayAndIndex(id, items = outline.value, parent = null) {
+      console.log('🔍 findParentArrayAndIndex searching for id:', id, 'in array with', items.length, 'items, parent:', parent?.id);
+      
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         if (item.id === id) {
+          console.log('✅ Found item:', id, 'at index:', i, 'with parent:', parent?.id);
           return { parent, array: items, index: i };
         }
         if (item.children && item.children.length) {
+          console.log('🔍 Recursively searching children of item:', item.id);
           const found = findParentArrayAndIndex(id, item.children, item);
           if (found) return found;
         }
       }
+      console.log('❌ Item not found in this array');
       return null;
     }
 
@@ -1426,20 +1431,104 @@ export default {
       hasChanges.value = true; debouncedSave();
     }
 
-    function handleOutdent({ id }) {
+    async function handleOutdent({ id }) {
+      //console.log('🔄 handleOutdent called for id:', id);
+      
       const ctx = findParentArrayAndIndex(id);
-      if (!ctx) return;
+      console.log('📍 Found context:', ctx);
+      
+      if (!ctx) {
+        console.error('❌ No context found for id:', id);
+        return;
+      }
+      
       const { parent, array: parentArray, index } = ctx;
-      if (!parent) return; // already root
+      console.log('👨‍👧‍👦 Parent:', parent?.id, 'Array:', parentArray, 'Index:', index);
+      
+      if (!parent) {
+        console.log('⚠️ Item is already at root level');
+        return; // already root
+      }
+      
       const item = parentArray.splice(index, 1)[0];
-      // Find grandparent context
-      const grandCtx = findParentArrayAndIndex(parent.id);
-      const grandArray = grandCtx ? grandCtx.array : outline.value;
-      const parentIndex = grandCtx ? grandCtx.index : outline.value.findIndex(i => i.id === parent.id);
-      grandArray.splice(parentIndex + 1, 0, item);
+      console.log('✂️ Removed item:', item?.id, 'from parent array');
+      
+      // Find where the parent is located in the outline structure
+      // We want to insert the item as a sibling of the parent, not as a child of the parent's parent
+      let targetArray, targetIndex;
+      
+      // Check if the parent is at the root level by looking directly in the root array
+      const rootIndex = outline.value.findIndex(i => i.id === parent.id);
+      if (rootIndex !== -1) {
+        // Parent is at root level, so we insert into the root array
+        targetArray = outline.value;
+        targetIndex = rootIndex;
+        console.log('🏠 Parent is at root level - inserting into root array at index:', targetIndex);
+      } else {
+        // Parent has its own parent, so we need to find where it's located
+        const parentCtx = findParentArrayAndIndex(parent.id);
+        console.log('🔍 Parent context:', parentCtx);
+        
+        if (parentCtx) {
+          // We need to find the GRANDPARENT context (parent of the parent)
+          // This makes the item a sibling of the parent, at the grandparent level
+          const grandparentCtx = findParentArrayAndIndex(parentCtx.parent.id);
+          console.log('🔍 Grandparent context:', grandparentCtx);
+          
+          if (grandparentCtx) {
+            // Insert into the grandparent's children array
+            targetArray = grandparentCtx.array;
+            targetIndex = grandparentCtx.index;
+            console.log('📁 Parent has grandparent - inserting into grandparent array at index:', targetIndex);
+          } else {
+            // Grandparent is at root level
+            targetArray = outline.value;
+            targetIndex = outline.value.findIndex(i => i.id === parentCtx.parent.id);
+            console.log('🏠 Grandparent is at root level - inserting into root array at index:', targetIndex);
+          }
+        } else {
+          console.error('❌ Could not find parent context for outdent operation');
+          return;
+        }
+      }
+      
+      // Ensure we found the parent in the target array
+      if (targetIndex === -1) {
+        console.error('❌ Could not find parent in target array for outdent operation');
+        return;
+      }
+      
+      // Insert the item after the parent in the target array
+      targetArray.splice(targetIndex + 1, 0, item);
+      console.log('✅ Inserted item after parent at index:', targetIndex + 1, 'in array:', targetArray);
+      
+      // Force a UI update by incrementing the sync counter and triggering reactivity
+      syncCounter.value++;
+      console.log('🔄 Incremented sync counter to force UI update');
+      
+      // Force Vue to detect the deep changes by using nextTick and a more robust reactivity trigger
+      await nextTick();
+      
+      // Create a completely new array reference to force deep reactivity
+      if (Array.isArray(outline.value)) {
+        const newOutline = JSON.parse(JSON.stringify(outline.value));
+        outline.value = newOutline;
+        console.log('🔄 Forced deep outline array reactivity update');
+      }
+      
+      // Force a complete re-render by incrementing sync counter multiple times
+      // This ensures all child components get new keys and remount
+      setTimeout(() => {
+        syncCounter.value++;
+        console.log('🔄 Second sync counter increment to force complete re-render');
+      }, 0);
+      
       // If parent was collapsed, still fine because item is now sibling and visible; no change needed
       setExclusiveAutoFocus(id);
-      hasChanges.value = true; debouncedSave();
+      hasChanges.value = true; 
+      debouncedSave();
+      
+      console.log('🔄 Outdent operation completed for item:', id);
     }
 
     function handleAddSiblingRoot({ id, asChild }) {
