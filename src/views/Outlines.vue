@@ -258,7 +258,7 @@ import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElNotification, ElMessageBox } from 'element-plus';
 import { Clock, Refresh, Search, Back, Loading, Warning, Check, Close } from '@element-plus/icons-vue';
-import { supabase } from '../supabase';
+import { supabase } from '@aiworkspace/shared-header'
 import OutlinePointsCt from '../components/OutlinePointsCt.vue';
 import OutlineDiff from '../components/OutlineDiff.vue';
 import OutlineTabs from '../components/OutlineTabs.vue';

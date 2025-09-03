@@ -130,7 +130,7 @@
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Close, Edit, Delete, DocumentCopy, ArrowLeft, ArrowRight, Loading, Warning } from '@element-plus/icons-vue'
-import { supabase } from '../supabase'
+import { supabase } from '@aiworkspace/shared-header'
 
 export default {
   name: 'OutlineTabs',
