@@ -76,6 +76,10 @@
               <el-icon><Link /></el-icon>
               Copy Internal Link
             </el-dropdown-item>
+            <el-dropdown-item command="copy-point">
+              <el-icon><DocumentCopy /></el-icon>
+              Copy Point
+            </el-dropdown-item>
             <el-dropdown-item divided disabled class="info-divider">
               <div class="item-info-inline">
                 <div v-if="getCreatedInfo().date" class="info-line">
@@ -268,13 +272,13 @@
 
 <script>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
-import { Plus, Delete, MoreFilled, ChatDotRound, Link, Right, Back, CaretRight, CaretBottom } from '@element-plus/icons-vue'
+import { Plus, Delete, MoreFilled, ChatDotRound, Link, Right, Back, CaretRight, CaretBottom, DocumentCopy } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { dragState } from './dragState.js'
 
 export default {
   name: 'OutlinePointsCt',
-  components: { Plus, Delete, MoreFilled, ChatDotRound, Link, Right, Back, CaretRight, CaretBottom },
+  components: { Plus, Delete, MoreFilled, ChatDotRound, Link, Right, Back, CaretRight, CaretBottom, DocumentCopy },
   props: {
     item: { type: Object, required: true },
     readonly: { type: Boolean, default: false },
@@ -331,6 +335,7 @@ export default {
     })
 
     const validLink = computed(() => /^(https?:\/\/).+/i.test(linkUrl.value.trim()))
+
 
     const escapeHtml = (str = '') => str
       .replace(/&/g, '&amp;')
@@ -796,6 +801,9 @@ export default {
         case 'copy-link':
           copyInternalLink()
           break
+        case 'copy-point':
+          copyPoint()
+          break
       }
     }
 
@@ -809,6 +817,32 @@ export default {
         ElMessage.error('Copy failed')
       }
     }
+
+    // Copy point with all children
+    const copyPoint = () => {
+      try {
+        // Create a deep copy of the item with all its children
+        const copyData = {
+          type: 'outline-point',
+          data: JSON.parse(JSON.stringify(props.item)),
+          timestamp: Date.now(),
+          workspaceId: props.outlineMetadata?.workspaceId || null
+        }
+        
+        // Store in clipboard as JSON
+        const clipboardData = JSON.stringify(copyData)
+        navigator.clipboard.writeText(clipboardData)
+        
+        // Also store in localStorage for cross-tab access
+        localStorage.setItem('outline-copied-point', clipboardData)
+        
+        ElMessage.success(`Copied "${props.item.text?.slice(0, 50) || 'point'}" with ${hasChildren.value ? props.item.children.length : 0} children`)
+      } catch (e) {
+        console.error('Copy point failed:', e)
+        ElMessage.error('Copy failed')
+      }
+    }
+
 
     const deleteGuard = ref({ lastId: null, ts: 0 })
 
@@ -1208,6 +1242,31 @@ export default {
         const active = document.activeElement
         const tag = active && active.tagName && active.tagName.toLowerCase()
         const isEditable = tag === 'textarea' || tag === 'input' || (active && active.isContentEditable)
+        
+        // Check for outline-point data in clipboard text
+        const clipboardText = e.clipboardData?.getData('text/plain') || ''
+        if (clipboardText.trim()) {
+          try {
+            const parsed = JSON.parse(clipboardText)
+            if (parsed.type === 'outline-point' && parsed.data) {
+              // Found outline-point data, handle it
+              e.preventDefault()
+              e.stopPropagation()
+              
+              // Store the copied data in localStorage
+              localStorage.setItem('outline-copied-point', clipboardText)
+              
+              // If we're not in an editable field, paste as sibling of the current item
+              if (!isEditable) {
+                await pastePoint(false) // asChild = false (paste as sibling)
+                return
+              }
+            }
+          } catch (parseError) {
+            // Not JSON or not outline-point data, continue with normal paste handling
+          }
+        }
+        
         // If user is focused in an input/textarea/contenteditable, let the element handle paste
         if (isEditable) return
 
@@ -1223,7 +1282,7 @@ export default {
           }
         }
       } catch (err) {
-        // swallow
+        console.error('Global paste handler error:', err)
       }
     }
 
@@ -1338,6 +1397,7 @@ export default {
       handleCollapseToggle,
       imageSrc,
       copyInternalLink,
+      copyPoint,
       processImageFile,
       handleSelection,
       clearSelection,

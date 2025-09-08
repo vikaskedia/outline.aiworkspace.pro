@@ -730,6 +730,66 @@ export default {
       const paramTabId = route.params.tab_id || route.query.tab || null;
       await loadOutline(paramTabId);
       
+      // Add global paste handler for outline-point data
+      const globalPasteHandler = async (e) => {
+        try {
+          const clipboardText = e.clipboardData?.getData('text/plain') || '';
+          if (clipboardText.trim()) {
+            try {
+              const parsed = JSON.parse(clipboardText);
+              if (parsed.type === 'outline-point' && parsed.data) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // Store the copied data
+                localStorage.setItem('outline-copied-point', clipboardText);
+                
+                // Add as a new root item
+                const newItem = {
+                  ...parsed.data,
+                  id: Date.now(),
+                  autoFocus: true,
+                  created_at: new Date().toISOString(),
+                  created_by: userInfo.value?.id,
+                  created_by_name: userInfo.value?.name || userInfo.value?.email
+                };
+                
+                // Update IDs for all children
+                const updateIds = (item) => {
+                  item.id = Date.now() + Math.random() * 1000;
+                  if (item.children && item.children.length > 0) {
+                    item.children.forEach(updateIds);
+                  }
+                };
+                updateIds(newItem);
+                
+                // Add to root level
+                outline.value.push(newItem);
+                hasChanges.value = true;
+                
+                if (!saving.value) {
+                  saveOutline();
+                }
+                
+                ElNotification({
+                  title: 'Paste Successful',
+                  message: `Pasted "${newItem.text?.slice(0, 50) || 'point'}" as root item`,
+                  type: 'success',
+                  duration: 3000
+                });
+              }
+            } catch (parseError) {
+              // Not outline-point data, ignore
+            }
+          }
+        } catch (error) {
+          console.error('Global paste handler error:', error);
+        }
+      };
+      
+      window.addEventListener('paste', globalPasteHandler);
+      window.outlineGlobalPasteHandler = globalPasteHandler;
+      
       // Add localStorage cross-tab synchronization
       const handleStorageChange = (event) => {
         // Only respond to changes for our workspace
@@ -867,6 +927,12 @@ export default {
       if (window.outlineStorageHandler) {
         window.removeEventListener('storage', window.outlineStorageHandler);
         delete window.outlineStorageHandler;
+      }
+      
+      // Cleanup global paste handler
+      if (window.outlineGlobalPasteHandler) {
+        window.removeEventListener('paste', window.outlineGlobalPasteHandler);
+        delete window.outlineGlobalPasteHandler;
       }
     });
 
@@ -1612,6 +1678,7 @@ export default {
         saveOutline();
       }
     }
+
 
     // Manual refresh function for user-triggered sync
     async function manualRefresh() {
