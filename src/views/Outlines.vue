@@ -3,11 +3,6 @@
   <div v-if="!isAuthenticated && authCheckDone" class="not-auth-message">
     <h2>Sign in required</h2>
     <p>Please log in to view and edit this workspace outline.</p>
-    <p>
-      <a href="https://login.aiworkspace.pro" rel="noopener" class="login-link">
-        Sign in at login.aiworkspace.pro
-      </a>
-    </p>
   </div>
   <div v-else-if="!authCheckDone" class="not-auth-message">
     <h2>Loading...</h2>
@@ -626,12 +621,27 @@ export default {
     }
 
     // Load a specific outline by ID or the first available outline
-    async function loadOutline(specificOutlineId = null) {
+    async function loadOutline(specificOutlineId = null, retryCount = 0) {
       authCheckDone.value = false; // reset before each load
       if (!workspaceId.value) { authCheckDone.value = true; return; }
       loadCollapsedState();
       hasChanges.value = false;
       try {
+        // Check if supabase client is properly initialized
+        if (!supabase || !supabase.auth) {
+          if (retryCount < 10) { // Max 10 retries
+            const delay = Math.min(100 * Math.pow(2, retryCount), 2000); // Exponential backoff, max 2s
+            console.warn(`Supabase client not ready, retrying in ${delay}ms... (attempt ${retryCount + 1}/10)`);
+            setTimeout(() => loadOutline(specificOutlineId, retryCount + 1), delay);
+            return;
+          } else {
+            console.error('Supabase client failed to initialize after 10 attempts');
+            isAuthenticated.value = false;
+            authCheckDone.value = true;
+            return;
+          }
+        }
+        
         const { data: { user: authUser } } = await supabase.auth.getUser();
         if (!authUser) {
           isAuthenticated.value = false;
@@ -713,6 +723,9 @@ export default {
     }
 
     onMounted(async () => {
+      // Wait a bit for the shared header to initialize supabase
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
       // If the route contains a tab id param, load that specific outline
       const paramTabId = route.params.tab_id || route.query.tab || null;
       await loadOutline(paramTabId);
@@ -818,11 +831,30 @@ export default {
       }
     });
 
+    // Watch for supabase client to become available and retry loading if needed
+    let supabaseCheckInterval;
+    const checkSupabaseReady = () => {
+      if (supabase && supabase.auth && !authCheckDone.value) {
+        console.log('Supabase client is now ready, retrying loadOutline...');
+        clearInterval(supabaseCheckInterval);
+        const paramTabId = route.params.tab_id || route.query.tab || null;
+        loadOutline(paramTabId);
+      }
+    };
+    
+    // Check every 100ms for up to 5 seconds
+    supabaseCheckInterval = setInterval(checkSupabaseReady, 100);
+    setTimeout(() => clearInterval(supabaseCheckInterval), 5000);
+
     // Cleanup real-time subscription on unmount
     onUnmounted(() => {
       if (realtimeSubscription.value) {
         try { realtimeSubscription.value.unsubscribe(); } catch (e) {}
         realtimeSubscription.value = null;
+      }
+      // Clean up supabase check interval
+      if (supabaseCheckInterval) {
+        clearInterval(supabaseCheckInterval);
       }
       // Clear any scheduled reconnect to avoid background retries
       if (reconnectTimer.value) {
