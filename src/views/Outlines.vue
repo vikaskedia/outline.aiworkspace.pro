@@ -283,7 +283,7 @@ function debounce(func, wait) {
 // Constants
 const MAX_HISTORY_VERSIONS = 50;
 
-// Generate unique render ID for this tab
+// Generate unique render ID for this tab instance
 function generateRenderID() {
   return 'render_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 }
@@ -396,6 +396,7 @@ export default {
     const selectedNewVersion = ref(null);
     
     // Generate unique render ID for this tab/component instance
+    // Include tab ID and timestamp to ensure uniqueness across different tabs
     const outlineRenderID = ref(generateRenderID());
 
     // Remove mock workspace assignment; rely on store / route
@@ -797,7 +798,8 @@ export default {
         const versionKey = getVersionKey();
 
         // Determine active tab for this tab instance
-        const activeTabForThis = route.params.tab_id || outlineId.value;
+        // Use the current outline ID as the active tab identifier
+        const activeTabForThis = outlineId.value;
 
         // When another tab writes the outline data, they should also set a companion
         // key `${localStorageKey}_tab` with their active tab id. We only apply
@@ -809,14 +811,34 @@ export default {
             const senderTabKey = `${localStorageKey}_tab`;
             const senderTabId = localStorage.getItem(senderTabKey);
 
-            if (senderTabId && senderTabId.toString() !== (activeTabForThis || '').toString()) {
+            // If senderTabId is null, it might be from an older version or a different source
+            // In this case, we should still apply the update but log it for debugging
+            if (senderTabId === null) {
+              console.log('📡 Cross-tab update with null senderTabId - applying update:', {
+                senderTabId,
+                currentActiveTab: activeTabForThis,
+                workspaceId: workspaceId.value,
+                renderId: outlineRenderID.value
+              });
+            } else if (senderTabId.toString() !== (activeTabForThis || '').toString()) {
               // The write came from a different active tab id; ignore to avoid cross-tab tab-id collisions
-              console.log('📡 Ignoring cross-tab update from different active tab:', senderTabId, 'current active tab:', activeTabForThis);
+              console.log('📡 Ignoring cross-tab update from different active tab:', {
+                senderTabId,
+                currentActiveTab: activeTabForThis,
+                workspaceId: workspaceId.value,
+                renderId: outlineRenderID.value
+              });
               return;
             }
 
             const newOutlineData = JSON.parse(event.newValue);
-            console.log('📡 Cross-tab localStorage sync detected (matching tab)');
+            console.log('📡 Cross-tab localStorage sync detected (matching tab):', {
+              senderTabId,
+              currentActiveTab: activeTabForThis,
+              workspaceId: workspaceId.value,
+              renderId: outlineRenderID.value,
+              hasChanges: hasChanges.value
+            });
 
             // Only update if we don't have unsaved changes
             if (!hasChanges.value) {
@@ -942,17 +964,21 @@ export default {
       try {
         saving.value = true;
         const localStorageKey = getLocalStorageKey(); const versionKey = getVersionKey();
-        localStorage.setItem(localStorageKey, JSON.stringify(outline.value));
+        
         // Also write which active tab (tab id) wrote this update so other tabs can decide
         // whether to apply the cross-tab update (only apply when their active tab matches)
         try {
-          const activeTabForThis = route.params.tab_id || outlineId.value;
+          const activeTabForThis = outlineId.value;
           if (activeTabForThis) {
+            // Set the tab ID first, then the outline data to ensure proper ordering
             localStorage.setItem(`${localStorageKey}_tab`, activeTabForThis.toString());
           }
         } catch (e) {
           // ignore storage errors
         }
+        
+        // Write the outline data after setting the tab ID
+        localStorage.setItem(localStorageKey, JSON.stringify(outline.value));
         // Persist to Supabase if outlineId exists
         const { data: { user: authUser } } = await supabase.auth.getUser();
         if (authUser) {
@@ -1920,9 +1946,8 @@ This prevents data loss and conflicts.`;
     async function subscribeToChanges() {
       if (!workspaceId.value || !outlineId.value) return;
 
-      // Determine an active tab id to include in the channel name.
-      // Prefer the explicit route param (when present) so subscriptions differ when users switch tabs.
-      const activeTabId = route.params.tab_id || outlineId.value;
+      // Use the current outline ID as the tab identifier for the channel
+      const activeTabId = outlineId.value;
 
       // Unsubscribe from any existing subscription
       if (realtimeSubscription.value) {
@@ -1936,10 +1961,18 @@ This prevents data loss and conflicts.`;
         realtimeSubscription.value = null;
       }
 
-      // Subscribe to changes on the outlines table. Include the active tab id in the channel name
-      // so each active tab gets its own channel instance.
+      // Subscribe to changes on the outlines table. Include the outline ID and render ID in the channel name
+      // so each tab gets its own unique channel instance.
+      const channelName = `outline_changes_${outlineId.value}_${outlineRenderID.value}`;
+      console.log('📡 Subscribing to real-time channel:', {
+        channelName,
+        outlineId: outlineId.value,
+        renderId: outlineRenderID.value,
+        workspaceId: workspaceId.value
+      });
+      
       realtimeSubscription.value = supabase
-        .channel(`outline_changes_${outlineId.value}_${outlineRenderID.value}_tab_${activeTabId}`)
+        .channel(channelName)
         .on(
           'postgres_changes',
           {
@@ -1964,7 +1997,12 @@ This prevents data loss and conflicts.`;
             const updateVersion = payload.new?.version;
             
             if (updateRenderID === outlineRenderID.value) {
-              console.log('⏭️ Skipping update - this came from our own tab (renderID match)');
+              console.log('⏭️ Skipping update - this came from our own tab (renderID match):', {
+                updateRenderID,
+                ourRenderID: outlineRenderID.value,
+                outlineId: outlineId.value,
+                workspaceId: workspaceId.value
+              });
               // Update our local version tracking to stay in sync
               if (updateVersion && updateVersion > currentVersion.value) {
                 currentVersion.value = updateVersion;
@@ -2016,7 +2054,14 @@ This prevents data loss and conflicts.`;
                 const versionIsSame = newVersion === currentVersion.value;
                 
                 if (versionIsNewer || versionIsSame) {
-                  console.log('🔄 Processing update from another tab');
+                  console.log('🔄 Processing update from another tab:', {
+                    updateRenderID,
+                    ourRenderID: outlineRenderID.value,
+                    outlineId: outlineId.value,
+                    workspaceId: workspaceId.value,
+                    currentVersion: currentVersion.value,
+                    newVersion
+                  });
                   
                   // Safe content comparison with error handling
                   let currentContentStr, newContentStr, contentIsDifferent;
@@ -2093,13 +2138,17 @@ This prevents data loss and conflicts.`;
                       try {
                         const localStorageKey = getLocalStorageKey();
                         const versionKey = getVersionKey();
+                        
+                        // Set the tab ID first
+                        try {
+                          const activeTabForThis = outlineId.value;
+                          if (activeTabForThis) localStorage.setItem(`${localStorageKey}_tab`, activeTabForThis.toString());
+                        } catch (e) {}
+                        
+                        // Then set the outline data
                         localStorage.setItem(localStorageKey, JSON.stringify(freshContent));
                         localStorage.setItem(versionKey, newVersion.toString());
                         localStorage.setItem(`${localStorageKey}_last_saved`, JSON.stringify(freshContent));
-                        try {
-                          const activeTabForThis = route.params.tab_id || outlineId.value;
-                          if (activeTabForThis) localStorage.setItem(`${localStorageKey}_tab`, activeTabForThis.toString());
-                        } catch (e) {}
                       } catch (storageError) {
                         console.warn('⚠️ Failed to update localStorage:', storageError);
                         // Continue execution even if localStorage fails
@@ -2191,13 +2240,17 @@ This prevents data loss and conflicts.`;
                         try {
                           const localStorageKey = getLocalStorageKey();
                           const versionKey = getVersionKey();
+                          
+                          // Set the tab ID first
+                          try {
+                            const activeTabForThis = outlineId.value;
+                            if (activeTabForThis) localStorage.setItem(`${localStorageKey}_tab`, activeTabForThis.toString());
+                          } catch (e) {}
+                          
+                          // Then set the outline data
                           localStorage.setItem(localStorageKey, JSON.stringify(newContent));
                           localStorage.setItem(versionKey, newVersion.toString());
                           localStorage.setItem(`${localStorageKey}_last_saved`, JSON.stringify(newContent));
-                          try {
-                            const activeTabForThis = route.params.tab_id || outlineId.value;
-                            if (activeTabForThis) localStorage.setItem(`${localStorageKey}_tab`, activeTabForThis.toString());
-                          } catch (e) {}
                         } catch (syncStorageError) {
                           console.warn('⚠️ Failed to update localStorage during sync:', syncStorageError);
                           // Continue execution even if localStorage fails
@@ -2272,7 +2325,13 @@ This prevents data loss and conflicts.`;
           }
         )
         .subscribe((status) => {
-          console.log('📡 Subscription status:', status);
+          console.log('📡 Subscription status:', {
+            status,
+            channelName,
+            outlineId: outlineId.value,
+            renderId: outlineRenderID.value,
+            workspaceId: workspaceId.value
+          });
 
           if (status === 'SUBSCRIBED') {
             console.log('✅ Successfully subscribed to outline changes');
