@@ -7,6 +7,14 @@ import App from './App.vue'
 import router from './router'
 
 import './style.css'
+import '@aiworkspace/shared-header/style.css'
+
+import { configureSupabase } from '@aiworkspace/shared-header'
+
+configureSupabase({
+  url: import.meta.env.VITE_SUPABASE_URL,
+  anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY
+})
 
 const app = createApp(App)
 const pinia = createPinia()

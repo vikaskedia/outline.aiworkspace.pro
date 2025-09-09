@@ -20,8 +20,6 @@ export default {
 </script>
 
 <style>
-@import '@aiworkspace/shared-header/style.css';
-
 * {
   box-sizing: border-box;
 }
