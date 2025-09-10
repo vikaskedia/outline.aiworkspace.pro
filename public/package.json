@@ -1,0 +1,38 @@
+{
+  "name": "outline.aiworkspace.pro",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vikaskedia/outline.aiworkspace.pro.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/vikaskedia/outline.aiworkspace.pro/issues"
+  },
+  "homepage": "https://github.com/vikaskedia/outline.aiworkspace.pro#readme",
+  "dependencies": {
+    "@aiworkspace/shared-header": "github:vikaskedia/header.aiworkspace.pro",
+    "@element-plus/icons-vue": "^2.3.2",
+    "@supabase/supabase-js": "^2.55.0",
+    "diff": "^8.0.2",
+    "diff2html": "^3.4.52",
+    "element-plus": "^2.10.7",
+    "pinia": "^3.0.3",
+    "vue": "^3.5.18",
+    "vue-router": "^4.5.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.1",
+    "vite": "^7.1.2"
+  }
+}
