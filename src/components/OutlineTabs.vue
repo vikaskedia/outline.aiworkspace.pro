@@ -9,9 +9,20 @@
             v-for="tab in tabs"
             :key="tab.id"
             class="tab-item"
-            :class="{ active: activeTabId === tab.id }"
+            :class="{ 
+              active: activeTabId === tab.id,
+              'dragging': dragState.draggedId === tab.id,
+              'drag-over': dragState.hoveredId === tab.id
+            }"
+            draggable="true"
             @click="switchTab(tab.id)"
             @contextmenu.prevent="openTabContextMenu($event, tab)"
+            @dragstart="handleDragStart($event, tab)"
+            @dragend="handleDragEnd"
+            @dragover="handleDragOver($event, tab)"
+            @dragenter="handleDragEnter($event, tab)"
+            @dragleave="handleDragLeave"
+            @drop="handleDrop($event, tab)"
           >
             <!-- Tab Title (editable) -->
             <div
@@ -131,6 +142,7 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Close, Edit, Delete, DocumentCopy, ArrowLeft, ArrowRight, Loading, Warning } from '@element-plus/icons-vue'
 import { supabase } from '@aiworkspace/shared-header'
+import { dragState } from './dragState.js'
 
 export default {
   name: 'OutlineTabs',
@@ -621,6 +633,115 @@ export default {
       }
     }
 
+    // Drag and drop handlers
+    const handleDragStart = (event, tab) => {
+      dragState.draggedId = tab.id
+      dragState.isDragging = true
+      event.dataTransfer.effectAllowed = 'move'
+      event.dataTransfer.setData('text/plain', tab.id.toString())
+      
+      // Add a slight delay to prevent immediate drag end
+      setTimeout(() => {
+        if (dragState.isDragging) {
+          event.target.style.opacity = '0.5'
+        }
+      }, 0)
+    }
+
+    const handleDragEnd = (event) => {
+      event.target.style.opacity = '1'
+      dragState.draggedId = null
+      dragState.hoveredId = null
+      dragState.isDragging = false
+    }
+
+    const handleDragOver = (event, tab) => {
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'move'
+    }
+
+    const handleDragEnter = (event, tab) => {
+      event.preventDefault()
+      if (dragState.draggedId !== tab.id) {
+        dragState.hoveredId = tab.id
+      }
+    }
+
+    const handleDragLeave = (event) => {
+      // Only clear hover state if we're actually leaving the tab element
+      if (!event.currentTarget.contains(event.relatedTarget)) {
+        dragState.hoveredId = null
+      }
+    }
+
+    const handleDrop = async (event, targetTab) => {
+      event.preventDefault()
+      
+      const draggedTabId = dragState.draggedId
+      if (!draggedTabId || draggedTabId === targetTab.id) {
+        return
+      }
+
+      try {
+        const draggedTab = tabs.value.find(t => t.id === draggedTabId)
+        const targetIndex = tabs.value.findIndex(t => t.id === targetTab.id)
+        const draggedIndex = tabs.value.findIndex(t => t.id === draggedTabId)
+
+        if (draggedIndex === -1 || targetIndex === -1) {
+          return
+        }
+
+        // Remove dragged tab from its current position
+        const [movedTab] = tabs.value.splice(draggedIndex, 1)
+        
+        // Insert at new position
+        const newIndex = draggedIndex < targetIndex ? targetIndex - 1 : targetIndex
+        tabs.value.splice(newIndex, 0, movedTab)
+
+        // Update tab orders in database
+        await updateTabOrders()
+
+        ElMessage.success('Tab order updated')
+      } catch (err) {
+        console.error('Error reordering tabs:', err)
+        ElMessage.error('Failed to reorder tabs')
+        // Reload tabs to restore correct order
+        await loadTabs()
+      } finally {
+        dragState.draggedId = null
+        dragState.hoveredId = null
+        dragState.isDragging = false
+      }
+    }
+
+    // Update tab orders in database
+    const updateTabOrders = async () => {
+      try {
+        const updates = tabs.value.map((tab, index) => ({
+          id: tab.id,
+          tab_order: index
+        }))
+
+        // Update each tab's order
+        for (const update of updates) {
+          const { error } = await supabase
+            .from('outlines')
+            .update({ tab_order: update.tab_order })
+            .eq('id', update.id)
+
+          if (error) throw error
+        }
+
+        // Update local tab orders
+        tabs.value.forEach((tab, index) => {
+          tab.tabOrder = index
+        })
+      } catch (err) {
+        console.error('Error updating tab orders:', err)
+        throw err
+      }
+    }
+
     // Watch for workspace changes
     watch(() => props.workspaceId, (newId) => {
       if (newId) {
@@ -646,6 +767,7 @@ export default {
       tabNameInput,
       canMoveLeft,
       canMoveRight,
+      dragState,
       loadTabs,
       switchTab,
       showCreateTabDialog,
@@ -655,7 +777,14 @@ export default {
       cancelEditTab,
       openTabContextMenu,
       handleTabCommand,
-      confirmDeleteTab
+      confirmDeleteTab,
+      handleDragStart,
+      handleDragEnd,
+      handleDragOver,
+      handleDragEnter,
+      handleDragLeave,
+      handleDrop,
+      updateTabOrders
     }
   }
 }
@@ -720,6 +849,20 @@ export default {
   margin-bottom: -2px;
   z-index: 1;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.tab-item.dragging {
+  opacity: 0.5;
+  transform: rotate(2deg);
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+
+.tab-item.drag-over {
+  border-color: #1976d2;
+  background: rgba(25, 118, 210, 0.1);
+  transform: scale(1.02);
+  box-shadow: 0 2px 8px rgba(25, 118, 210, 0.3);
 }
 
 .tab-title {
