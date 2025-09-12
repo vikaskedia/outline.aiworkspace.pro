@@ -1216,8 +1216,8 @@ export default {
 
     function handleDrilldown(id) {
       focusedId.value = id;
-      // Update URL
-      router.push({
+      // Update URL without creating new history entry
+      router.replace({
         query: { ...route.query, focus: id }
       });
     }
@@ -1231,14 +1231,14 @@ export default {
         focusedId.value = parent ? parent.id : null;
       }
       
-      // Update URL
+      // Update URL without creating new history entry
       const newQuery = { ...route.query };
       if (focusedId.value) {
         newQuery.focus = focusedId.value;
       } else {
         delete newQuery.focus;
       }
-      router.push({ query: newQuery });
+      router.replace({ query: newQuery });
     }
 
     function getFocusedOutline() {
@@ -1328,14 +1328,14 @@ export default {
     function handleBreadcrumb(node, idx) {
       focusedId.value = idx === 0 ? null : node.id;
       
-      // Update URL
+      // Update URL without creating new history entry
       const newQuery = { ...route.query };
       if (focusedId.value) {
         newQuery.focus = focusedId.value;
       } else {
         delete newQuery.focus;
       }
-      router.push({ query: newQuery });
+      router.replace({ query: newQuery });
     }
 
     // Return an href for breadcrumb anchor tags that mirrors handleBreadcrumb behavior
@@ -1902,25 +1902,39 @@ This prevents data loss and conflicts.`;
         return;
       }
 
-      // Try both string and number formats since IDs can be either
-      const targetIdNum = parseInt(focusParam);
+      // Try the original string value first (handles decimal IDs properly)
       const targetIdStr = focusParam.toString();
+      console.log('🔍 Validating focus for item:', targetIdStr, 'Outline length:', outline.value.length);
       
-      if (isNaN(targetIdNum)) {
-        console.warn('Invalid focus parameter:', focusParam);
-        focusedId.value = null;
-        return;
-      }
-
-      // Check if the focused item exists in the loaded outline (try both formats)
-      console.log('🔍 Validating focus for item:', targetIdNum, '(string:', targetIdStr, ') Outline length:', outline.value.length);
-      let focusedItem = findItemById(outline.value, targetIdNum);
+      let focusedItem = findItemById(outline.value, targetIdStr);
+      let targetId = targetIdStr;
+      
+      // If string match fails, try parsing as number (preserving decimals)
       if (!focusedItem) {
-        focusedItem = findItemById(outline.value, targetIdStr);
+        const targetIdNum = parseFloat(focusParam);
+        if (!isNaN(targetIdNum)) {
+          console.log('🔄 String match failed, trying numeric match:', targetIdNum);
+          focusedItem = findItemById(outline.value, targetIdNum);
+          if (focusedItem) {
+            targetId = targetIdNum;
+          }
+        }
+      }
+      
+      // If still no match, try integer parsing as last resort
+      if (!focusedItem) {
+        const targetIdInt = parseInt(focusParam);
+        if (!isNaN(targetIdInt) && targetIdInt.toString() !== targetIdStr) {
+          console.log('🔄 Numeric match failed, trying integer match:', targetIdInt);
+          focusedItem = findItemById(outline.value, targetIdInt);
+          if (focusedItem) {
+            targetId = targetIdInt;
+          }
+        }
       }
       if (focusedItem) {
-        console.log('✅ Restoring focus to item:', targetIdNum, focusedItem.text?.slice(0, 50));
-        focusedId.value = targetIdNum;
+        console.log('✅ Restoring focus to item:', targetId, focusedItem.text?.slice(0, 50));
+        focusedId.value = targetId;
         
         // Force UI update by triggering reactivity
         await nextTick();
@@ -1933,7 +1947,7 @@ This prevents data loss and conflicts.`;
         // Update page title for the focused item
         updatePageTitle();
       } else {
-        console.warn('⚠️ Focused item not found in outline:', targetIdNum, 'Available IDs:', getAllItemIds(outline.value));
+        console.warn('⚠️ Focused item not found in outline:', targetId, 'Available IDs:', getAllItemIds(outline.value));
         // Clear invalid focus from URL
         const newQuery = { ...route.query };
         delete newQuery.focus;
