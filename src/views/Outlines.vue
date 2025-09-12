@@ -24,13 +24,14 @@
     
     <!-- Breadcrumbs -->
     <div v-if="breadcrumbPath.length" class="outline-breadcrumbs">
-      <template v-for="(node, idx) in breadcrumbPath" :key="node.id">
+      <template v-for="(node, idx) in breadcrumbPath" :key="node.id || 'root'">
         <a
-          v-if="idx < breadcrumbPath.length - 1"
+          v-if="idx < breadcrumbPath.length - 1 || node.isRoot"
           class="breadcrumb-link"
           :href="breadcrumbHref(node, idx)"
+          @click.prevent="handleBreadcrumb(node, idx)"
         >
-          {{ getBreadcrumbText(node.text) }}
+          {{ node.isRoot ? 'Root' : getBreadcrumbText(node.text) }}
         </a>
         <span 
           v-else
@@ -1317,6 +1318,13 @@ export default {
 
     const breadcrumbPath = computed(() => {
       const path = findPathToNode(outline.value, focusedId.value) || [];
+      
+      // If we have a focused node, add a "Root" option at the beginning
+      if (focusedId.value && path.length > 0) {
+        const rootNode = { id: null, text: 'Root', isRoot: true };
+        return [rootNode, ...path];
+      }
+      
       console.log('🍞 Breadcrumb path computed:', {
         focusedId: focusedId.value,
         pathLength: path.length,
@@ -1326,7 +1334,13 @@ export default {
     });
 
     function handleBreadcrumb(node, idx) {
-      focusedId.value = idx === 0 ? null : node.id;
+      // If it's the Root node, clear focus to show all root items
+      if (node.isRoot) {
+        focusedId.value = null;
+      } else {
+        // For regular nodes, use the node id
+        focusedId.value = node.id;
+      }
       
       // Update URL without creating new history entry
       const newQuery = { ...route.query };
@@ -1341,7 +1355,16 @@ export default {
     // Return an href for breadcrumb anchor tags that mirrors handleBreadcrumb behavior
     function breadcrumbHref(node, idx) {
       const newQuery = { ...route.query };
-      const val = idx === 0 ? null : node.id;
+      let val;
+      
+      if (node.isRoot) {
+        // Root node should clear focus
+        val = null;
+      } else {
+        // For regular nodes, use the node id
+        val = node.id;
+      }
+      
       if (val) {
         newQuery.focus = val;
       } else {
@@ -2611,7 +2634,7 @@ This prevents data loss and conflicts.`;
 }
 
 .outline-breadcrumbs {
-  margin-bottom: 1rem;
+  margin: 1rem 0 0 0;
   font-size: 0.95rem;
   color: #888;
   padding: 0 2rem;
