@@ -5,9 +5,10 @@
       <div class="tabs-nav">
         <!-- Tabs Container -->
         <div class="tabs-container">
-          <div
+          <a
             v-for="tab in tabs"
             :key="tab.id"
+            :href="getTabHref(tab)"
             class="tab-item"
             :class="{ 
               active: activeTabId === tab.id,
@@ -15,8 +16,8 @@
               'drag-over': dragState.hoveredId === tab.id
             }"
             draggable="true"
-            @click="switchTab(tab.id)"
-            @contextmenu.prevent="openTabContextMenu($event, tab)"
+            @click.prevent="switchTab(tab.id)"
+            @contextmenu="openTabContextMenu($event, tab)"
             @dragstart="handleDragStart($event, tab)"
             @dragend="handleDragEnd"
             @dragover="handleDragOver($event, tab)"
@@ -51,7 +52,7 @@
             >
               <Close />
             </el-icon>
-          </div>
+          </a>
         </div>
         
         <!-- Add New Tab Button -->
@@ -143,6 +144,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Close, Edit, Delete, DocumentCopy, ArrowLeft, ArrowRight, Loading, Warning } from '@element-plus/icons-vue'
 import { supabase } from '@aiworkspace/shared-header'
 import { dragState } from './dragState.js'
+import { useRouter, useRoute } from 'vue-router'
 
 export default {
   name: 'OutlineTabs',
@@ -163,6 +165,9 @@ export default {
   },
   emits: ['tab-changed', 'tab-created', 'tab-deleted', 'tab-updated'],
   setup(props, { emit }) {
+    const router = useRouter()
+    const route = useRoute()
+    
     const tabs = ref([])
     const loading = ref(false)
     const error = ref(null)
@@ -184,6 +189,14 @@ export default {
       const index = tabs.value.findIndex(t => t.id === contextMenuTab.value.id)
       return index < tabs.value.length - 1
     })
+
+    // Generate href for tab anchor tags
+    const getTabHref = (tab) => {
+      const basePath = `/single-workspace/${props.workspaceId}/outlines/tab/${tab.id}`
+      // Preserve current query parameters if any
+      const currentQuery = route.query
+      return router.resolve({ path: basePath, query: currentQuery }).href
+    }
 
     // Load all outline tabs for the workspace
     const loadTabs = async () => {
@@ -784,7 +797,8 @@ export default {
       handleDragEnter,
       handleDragLeave,
       handleDrop,
-      updateTabOrders
+      updateTabOrders,
+      getTabHref
     }
   }
 }
@@ -834,12 +848,15 @@ export default {
   max-width: 180px;
   position: relative;
   font-size: 13px;
+  text-decoration: none; /* Only add this line */
+  color: inherit; /* Only add this line */
 }
 
 .tab-item:hover {
   background: #f5f7fa;
   border-color: #c0c4cc;
   transform: translateY(-1px);
+  text-decoration: none; /* Only add this line */
 }
 
 .tab-item.active {
