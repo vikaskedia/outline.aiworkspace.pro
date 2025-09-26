@@ -9,17 +9,12 @@ import router from './router'
 import './style.css'
 import '@aiworkspace/shared-header/style.css'
 
-import { configureSupabase, configureGitHub } from '@aiworkspace/shared-header'
+import { configureSupabase } from '@aiworkspace/shared-header'
 
 // Configure Supabase
 configureSupabase({
   url: import.meta.env.VITE_SUPABASE_URL,
   anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY
-})
-
-// Configure GitHub
-configureGitHub({
-  token: import.meta.env.VITE_GITHUB_TOKEN
 })
 
 const app = createApp(App)
