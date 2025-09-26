@@ -119,6 +119,8 @@
         @keydown.backspace="handleBackspace"
         @keydown.meta.b.prevent="handleBold"
         @keydown.ctrl.b.prevent="handleBold"
+        @keydown.meta.u.prevent="handleUnderline"
+        @keydown.ctrl.u.prevent="handleUnderline"
         @input="handleTextChange"
         @paste="handlePaste"
         @drop="handleFileDrop"
@@ -137,6 +139,9 @@
       >
         <button class="tooltip-button" @click="handleBold" title="Bold (⌘+B)">
           <strong>B</strong>
+        </button>
+        <button class="tooltip-button" @click="handleUnderline" title="Underline (⌘+U)">
+          <u>U</u>
         </button>
         <button class="tooltip-button" @click="openLinkDialog" title="Add link (⌘+K)">🔗 Link</button>
         <button class="tooltip-button" @click="clearSelection" title="Close">✕</button>
@@ -357,6 +362,9 @@ export default {
       // Process bold formatting **text** and __text__
       html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
       html = html.replace(/__(.*?)__/g, '<strong>$1</strong>')
+      
+      // Process underline formatting _u_text_/u_ (match your handleUnderline function)
+      html = html.replace(/_u_(.*?)_\/u_/g, '<u>$1</u>')
       
       // Markdown links [title](http://url)
       html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (m, label, url) => {
@@ -1416,6 +1424,74 @@ export default {
       requestAnimationFrame(autoResize)
     }
 
+    // Add the handleUnderline function
+    const handleUnderline = () => {
+      if (!editing.value) return
+      if (selectionStart.value == null || selectionEnd.value == null || selectionStart.value === selectionEnd.value) return
+      
+      const start = selectionStart.value
+      const end = selectionEnd.value
+      const original = editText.value
+      const selectedText = original.slice(start, end)
+      
+      // Check if the selected text is already underlined (has _u_ around it)
+      const beforeSelection = original.slice(Math.max(0, start - 3), start)
+      const afterSelection = original.slice(end, Math.min(original.length, end + 4))
+      
+      let newText
+      let newCursorPos
+      
+      if (beforeSelection === '_u_' && afterSelection === '_/u_') {
+        // Remove underline formatting
+        newText = original.slice(0, start - 3) + selectedText + original.slice(end + 4)
+        newCursorPos = { start: start - 3, end: end - 3 }
+      } else {
+        // Add underline formatting
+        const underlineText = `_u_${selectedText}_/u_`
+        newText = original.slice(0, start) + underlineText + original.slice(end)
+        newCursorPos = { start: start + 3, end: end + 3 }
+      }
+      
+      editText.value = newText
+      
+      // Update cursor position
+      if (textarea.value) {
+        textarea.value.focus()
+        // Use setTimeout to ensure the text is updated first
+        setTimeout(() => {
+          if (textarea.value) {
+            textarea.value.setSelectionRange(newCursorPos.start, newCursorPos.end)
+          }
+        }, 0)
+      }
+      
+      // Emit update since we changed text programmatically
+      const updatePayload = {
+        id: props.item.id,
+        text: editText.value,
+        immediate: true
+      }
+      
+      // Preserve fileUrl if it exists
+      if (props.item.fileUrl) {
+        updatePayload.fileUrl = props.item.fileUrl
+      }
+      
+      // Add editor info if we have current user info
+      if (props.userInfo?.id) {
+        updatePayload.updated_by = props.userInfo.id
+        updatePayload.updated_by_name = props.userInfo.name || props.userInfo.email
+      }
+      
+      emit('update', updatePayload)
+      
+      // Clear selection tooltip
+      selectionTooltipVisible.value = false
+      
+      // Auto-resize textarea
+      requestAnimationFrame(autoResize)
+    }
+
     return {
       editing,
       editText,
@@ -1445,6 +1521,7 @@ export default {
       handleOutdent,
       handleBackspace,
       handleBold, // ← Make sure this is included in the return
+      handleUnderline,
       handleCommand,
       handleDelete,
       toggleCollapse,
@@ -1882,6 +1959,18 @@ export default {
 /* Selection tooltip bold button styling */
 .tooltip-button strong {
   font-weight: 700;
+  font-size: 12px;
+}
+
+/* Underline text styling in rendered text */
+.outline-text :deep(u) {
+  text-decoration: underline;
+  color: #1a1a1a;
+}
+
+/* Selection tooltip underline button styling */
+.tooltip-button u {
+  text-decoration: underline;
   font-size: 12px;
 }
 </style>
