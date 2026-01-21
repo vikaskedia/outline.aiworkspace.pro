@@ -14,7 +14,7 @@
       <!-- Not authenticated message -->
       <div v-else-if="!isAuthenticated" class="not-auth-message">
         <h2>Sign in required</h2>
-        <p>Please log in to access the app.</p>
+        <p>Please log in to access workspace settings.</p>
       </div>
       <!-- Main content when authenticated -->
       <router-view v-else/>
@@ -24,7 +24,7 @@
 
 <script>
 import { ref, onMounted, computed, watch } from 'vue'
-import { AIWorkspaceHeader } from '@aiworkspace/shared-header'
+import { AIWorkspaceHeader, waitForAuthReady } from '@aiworkspace/shared-header'
 import '@aiworkspace/shared-header/utils/universalCallback'
 import { supabase } from '@aiworkspace/shared-header'
 import { useWorkspaceStore } from './store/workspace'
@@ -83,18 +83,17 @@ export default {
 
     const checkAuth = async () => {
       try {
-        // Check if supabase client is properly initialized
-        if (!supabase || !supabase.auth) {
-          console.warn('Supabase client not ready, retrying...')
-          setTimeout(checkAuth, 100)
-          return
-        }
+        // Wait for cross-subdomain auth to be ready first
+        // This ensures cookies are synced before we check auth
+        console.log('[Settings] Waiting for cross-subdomain auth to be ready...')
+        const authResult = await waitForAuthReady()
+        console.log('[Settings] Auth ready:', authResult)
         
-        const { data: { user } } = await supabase.auth.getUser()
-        if (user) {
+        if (authResult.isAuthenticated && authResult.session) {
           isAuthenticated.value = true
+          const user = authResult.session.user
           workspaceStore.setUser(user)
-          console.log('User authenticated:', user.email)
+          console.log('[Settings] User authenticated via waitForAuthReady:', user?.email)
           
           // Load workspace data if we have a workspace_id in the route
           const workspaceId = route.params.workspace_id
@@ -102,12 +101,28 @@ export default {
             await loadWorkspaceData(workspaceId)
           }
         } else {
+          // Double-check with supabase directly in case session was established after
+          if (supabase && supabase.auth) {
+            const { data: { user } } = await supabase.auth.getUser()
+            if (user) {
+              isAuthenticated.value = true
+              workspaceStore.setUser(user)
+              console.log('[Settings] User authenticated via fallback check:', user.email)
+              
+              const workspaceId = route.params.workspace_id
+              if (workspaceId) {
+                await loadWorkspaceData(workspaceId)
+              }
+              return
+            }
+          }
+          
           isAuthenticated.value = false
           workspaceStore.setUser(null)
-          console.log('No authenticated user')
+          console.log('[Settings] No authenticated user')
         }
       } catch (error) {
-        console.error('Auth check failed:', error)
+        console.error('[Settings] Auth check failed:', error)
         isAuthenticated.value = false
         workspaceStore.setUser(null)
       } finally {
@@ -116,8 +131,6 @@ export default {
     }
 
     onMounted(async () => {
-      // Wait a bit for the shared header to initialize supabase
-      await new Promise(resolve => setTimeout(resolve, 50))
       await checkAuth()
       
       // Make loadWorkspaces available globally for the shared header
@@ -146,7 +159,9 @@ body {
   margin: 0;
   padding: 0;
 }
-
+.logo-section img.logo-image {
+    height: auto;
+}
 #app {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -296,11 +311,6 @@ button:focus {
   margin: 0;
   color: #555;
   font-size: 1rem;
-}
-
-/* Logo section customization */
-.logo-section img.logo-image {
-    height: auto;
 }
 
 /* Responsive design */
